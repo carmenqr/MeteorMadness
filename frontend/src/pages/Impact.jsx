@@ -36,16 +36,16 @@ async function fetchText(url) {
   return r.text();
 }
 
-// Very simple status parser for NWS/NOAA tsunami bulletins
-function parseTsunamiStatus(txt) {
-  const t = txt.toUpperCase();
-  if (/TSUNAMI WARNING/.test(t)) return { level: "warning", label: "Tsunami WARNING" };
-  if (/TSUNAMI WATCH/.test(t)) return { level: "watch", label: "Tsunami WATCH" };
-  if (/TSUNAMI ADVISORY/.test(t)) return { level: "advisory", label: "Tsunami ADVISORY" };
-  if (/NO TSUNAMI THREAT/.test(t) || /THERE IS NO TSUNAMI THREAT/.test(t))
-    return { level: "no_threat", label: "No tsunami threat" };
-  return { level: "info", label: "Tsunami information" };
-}
+// // Very simple status parser for NWS/NOAA tsunami bulletins
+// function parseTsunamiStatus(txt) {
+//   const t = txt.toUpperCase();
+//   if (/TSUNAMI WARNING/.test(t)) return { level: "warning", label: "Tsunami WARNING" };
+//   if (/TSUNAMI WATCH/.test(t)) return { level: "watch", label: "Tsunami WATCH" };
+//   if (/TSUNAMI ADVISORY/.test(t)) return { level: "advisory", label: "Tsunami ADVISORY" };
+//   if (/NO TSUNAMI THREAT/.test(t) || /THERE IS NO TSUNAMI THREAT/.test(t))
+//     return { level: "no_threat", label: "No tsunami threat" };
+//   return { level: "info", label: "Tsunami information" };
+// }
 
 const badgeStyle = (level) => {
   const base = {
@@ -205,15 +205,15 @@ export default function ImpactMMI() {
 
   const [histUrls, setHistUrls] = useState({ fatal: null, econ: null });
 
-  // TSUNAMI state
-  const [tsuUrl, setTsuUrl] = useState(
-    "https://www.tsunami.gov/events/PAAQ/2025/09/25/t34le6/1/WEXX32/WEXX32.txt"
-  );
-  const [tsuLoading, setTsuLoading] = useState(false);
-  const [tsuError, setTsuError] = useState(null);
-  const [tsuText, setTsuText] = useState(null);
-  const [tsuStatus, setTsuStatus] = useState(null);
-  const [tsuOpen, setTsuOpen] = useState(false); // para plegar/desplegar el <pre>
+  // // TSUNAMI state
+  // const [tsuUrl, setTsuUrl] = useState(
+  //   "https://www.tsunami.gov/events/PAAQ/2025/09/25/t34le6/1/WEXX32/WEXX32.txt"
+  // );
+  // const [tsuLoading, setTsuLoading] = useState(false);
+  // const [tsuError, setTsuError] = useState(null);
+  // const [tsuText, setTsuText] = useState(null);
+  // const [tsuStatus, setTsuStatus] = useState(null);
+  // const [tsuOpen, setTsuOpen] = useState(false); // para plegar/desplegar el <pre>
 
 
   // Create map once
@@ -449,7 +449,7 @@ export default function ImpactMMI() {
     });
   }, [selectedLabel]);
 
-  // Carga del boletín de tsunami.gov con fallback vía proxy backend
+/*   // Carga del boletín de tsunami.gov con fallback vía proxy backend
   useEffect(() => {
     let aborted = false;
     if (!tsuUrl) return;
@@ -492,7 +492,7 @@ export default function ImpactMMI() {
 
     return () => { aborted = true; };
   }, [tsuUrl]);
-
+ */
 
   // UI helpers
   const mmiOptions = useMemo(() => labelOrder.map(lab => ({
@@ -807,7 +807,7 @@ export default function ImpactMMI() {
           )}
         </div>
 
-        {/* Step 4: Tsunami (bulletin from tsunami.gov) */}
+        {/* Step 4: Tsunami (bulletin from tsunami.gov) 
         <div style={{ marginTop: 18 }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>4) Tsunami</div>
 
@@ -822,7 +822,7 @@ export default function ImpactMMI() {
               padding: 8, borderRadius: 8
             }}>
               Could not load bulletin: {tsuError}<br />
-              {/* Sugerencia si CORS: */}
+              {/* Sugerencia si CORS: 
               If this is a CORS issue, route via your backend proxy (/api/proxy).
             </div>
           )}
@@ -856,7 +856,7 @@ export default function ImpactMMI() {
             </div>
           )}
 
-          {/* (opcional) permitir cambiar la URL del TXT en runtime */}
+          {/* (opcional) permitir cambiar la URL del TXT en runtime 
           <div style={{ marginTop: 10, fontSize: 12, opacity: .7 }}>
             Source TXT:&nbsp;
             <input
@@ -866,7 +866,8 @@ export default function ImpactMMI() {
               placeholder="https://www.tsunami.gov/.../WEXX32.txt"
             />
           </div>
-        </div>
+        </div> 
+        */}
 
 
         {/* Small note */}

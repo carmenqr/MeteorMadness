@@ -116,33 +116,33 @@ def receive_data_asteroides():
 
     return jsonify({"status": "OK", "received": data}), 200
 
-@app.get("/api/proxy")
-def proxy():
-    """
-    Proxy seguro para poder leer recursos sin CORS desde el frontend.
-    Restringido a tsunami.gov.
-    Uso: /api/proxy?url=https://www.tsunami.gov/.../WEXX32.txt
-    """
-    u = request.args.get("url", "")
-    if not u:
-        return ("Missing url", 400)
+# @app.get("/api/proxy")
+# def proxy():
+#     """
+#     Proxy seguro para poder leer recursos sin CORS desde el frontend.
+#     Restringido a tsunami.gov.
+#     Uso: /api/proxy?url=https://www.tsunami.gov/.../WEXX32.txt
+#     """
+#     u = request.args.get("url", "")
+#     if not u:
+#         return ("Missing url", 400)
 
-    host = (urlparse(u).hostname or "").lower()
-    # Solo permitimos tsunami.gov por seguridad
-    if host not in ("www.tsunami.gov", "tsunami.gov"):
-        return ("Domain not allowed", 403)
+#     host = (urlparse(u).hostname or "").lower()
+#     # Solo permitimos tsunami.gov por seguridad
+#     if host not in ("www.tsunami.gov", "tsunami.gov"):
+#         return ("Domain not allowed", 403)
 
-    try:
-        r = requests.get(u, timeout=10)
-    except requests.RequestException as e:
-        return (f"Upstream fetch error: {e}", 502)
+#     try:
+#         r = requests.get(u, timeout=10)
+#     except requests.RequestException as e:
+#         return (f"Upstream fetch error: {e}", 502)
 
-    resp = Response(r.content, status=r.status_code)
-    # Conserva el tipo si viene; si no, fuerza text/plain
-    resp.headers["Content-Type"] = r.headers.get("Content-Type", "text/plain; charset=utf-8")
-    # CORS para que el front pueda leerlo
-    resp.headers["Access-Control-Allow-Origin"] = "*"
-    return resp
+#     resp = Response(r.content, status=r.status_code)
+#     # Conserva el tipo si viene; si no, fuerza text/plain
+#     resp.headers["Content-Type"] = r.headers.get("Content-Type", "text/plain; charset=utf-8")
+#     # CORS para que el front pueda leerlo
+#     resp.headers["Access-Control-Allow-Origin"] = "*"
+#     return resp
 
 if __name__ == "__main__":
     app.run(debug=True)

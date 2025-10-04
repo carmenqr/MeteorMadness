@@ -9,7 +9,7 @@ export default function App() {
     <Suspense fallback={<div style={{padding:16}}>Cargando…</div>}>
       <Routes>
         <Route path="/" element={<HomePage />} />
-        <Route path="/impacto" element={<Impact />} />
+        <Route path="/impact" element={<Impact />} />
         {/* Si quieres que cualquier ruta desconocida vaya a la landing */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
