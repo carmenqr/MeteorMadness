@@ -1,12 +1,17 @@
+import * as THREE from 'three'; // si ya estaba, mantener; si no se usa puedes quitarlo
 // src/home-panel.js
 // Self-contained side panel for asteroid/planet info with didactic explanations
 
 let panelEl = null;
-let resetHandlers = new Set();
+let panelStyleEl = null;
+let keydownHandler = null;
+
+const resetHandlers = new Set();
 
 // --- Impactor form state & mini API ---
 let impactorState = { massKg: null, speedKms: null, densityKgM3: null };
 const impactorListeners = new Set();
+
 
 export function getImpactorState() {
   return { ...impactorState };
@@ -15,6 +20,16 @@ export function onImpactorChange(handler) {
   impactorListeners.add(handler);
   return () => impactorListeners.delete(handler);
 }
+
+/** Allow home.js to react to "Restore" click */
+export function onPanelReset(handler) {
+  resetHandlers.add(handler);
+  return () => resetHandlers.delete(handler);
+}
+
+export function offPanelReset(fn) { resetHandlers.delete(fn); }
+export function offImpactorChange(fn) { impactorListeners.delete(fn); }
+
 function emitImpactorChange() {
   for (const fn of impactorListeners) { try { fn({ ...impactorState }); } catch {} }
 }
@@ -112,6 +127,25 @@ export function hidePanel() {
   if (!panelEl) return;
   panelEl.style.display = 'none';
   panelEl.innerHTML = '';
+}
+
+// Export new destroy function
+export function destroyInfoPanel() {
+  // Evitar ReferenceError (ahora todas existen)
+  if (keydownHandler) {
+    window.removeEventListener('keydown', keydownHandler);
+    keydownHandler = null;
+  }
+  if (panelEl?.parentNode) {
+    panelEl.parentNode.removeChild(panelEl);
+  }
+  if (panelStyleEl?.parentNode) {
+    panelStyleEl.parentNode.removeChild(panelStyleEl);
+  }
+  panelEl = null;
+  panelStyleEl = null;
+  resetHandlers.clear();
+  impactorListeners.clear();
 }
 
 /** Definitions, labels and units for common orbital elements */
@@ -406,10 +440,4 @@ export function showPanelFor(item) {
       tip.classList.toggle('show');
     });
   });
-}
-
-/** Allow home.js to react to "Restore" click */
-export function onPanelReset(handler) {
-  resetHandlers.add(handler);
-  return () => resetHandlers.delete(handler);
 }

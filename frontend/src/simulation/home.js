@@ -2,9 +2,12 @@ import * as THREE from 'three';
 import { DEG2RAD } from '../lib/asteroid_utils.js';
 import { propagate, getOrbitPoints } from '../lib/orbit_utils.js';
 import { createScene } from './scene.js';
-import { initInfoPanel, showPanelFor, hidePanel, onPanelReset } from './home-panel.js';
+import { initInfoPanel, showPanelFor, hidePanel, onPanelReset, destroyInfoPanel } from './home-panel.js';
 import earthUrl from '../assets/earth.jpg'
 import asteroidUrl from '../assets/asteroid.jpg'
+
+const _domNodes = new Set();
+const _listeners = [];
 
 let asteroides = [];
 let simulationPaused = false;     // pausa/continúa la propagación
@@ -119,7 +122,6 @@ function restoreEarthScale(earthMesh){
   }
 }
 
-
 function restoreDefaultView({ smooth = false, duration = 700 } = {}) {
   const cam = window.__camera;
   const ctr = window.__controls;
@@ -231,22 +233,42 @@ async function cargarAsteroides() {
   }
 }
 
+function addListener(target, type, handler, opts) {
+  target.addEventListener(type, handler, opts);
+  _listeners.push(() => target.removeEventListener(type, handler, opts));
+}
+function registerNode(node) {
+  if (node) _domNodes.add(node);
+  return node;
+}
+
+function resetModuleState() {
+  asteroides = [];
+  earthData = null;
+  earthItem = null;
+  isolatedItem = null;
+  simulationPaused = false;
+  tweenCancel = null;
+  simDays = 0;
+  tabHidden = false;
+  savedView = null;
+  defaultView = { pos: null, target: null };
+}
+
 // ———————————————————————————————————————
 // UI auxiliar
 // ———————————————————————————————————————
 function ensureUI() {
-  // Contenedor de labels
   if (!document.getElementById('labels')) {
-    const labels = document.createElement('div');
+    const labels = registerNode(document.createElement('div'));
     labels.id = 'labels';
     Object.assign(labels.style, {
       position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 20
     });
     document.body.appendChild(labels);
   }
-  // Botón iniciar simulación (top-right)
   if (!document.getElementById('btn-start')) {
-    const topbar = document.createElement('div');
+    const topbar = registerNode(document.createElement('div'));
     Object.assign(topbar.style, {
       position: 'fixed', top: '12px', right: '12px', zIndex: 30, pointerEvents: 'auto'
     });
@@ -261,9 +283,7 @@ function ensureUI() {
     btn.addEventListener('click', () => {
       simulationPaused = true;
       window.dispatchEvent(new CustomEvent('sim:pause-orbits'));
-      window.dispatchEvent(new CustomEvent('sim:open-panel')); // engancha tu modal/form si lo tienes
-      // Si no tenéis aún modal, quita la línea de arriba y deja un console.log:
-      // console.log('Abrir panel de simulación');
+      window.dispatchEvent(new CustomEvent('sim:open-panel'));
     });
     topbar.appendChild(btn);
     document.body.appendChild(topbar);
@@ -331,15 +351,6 @@ onPanelReset(() => {
   restoreEarthScale(earthItem?.mesh || null);
   restoreDefaultView({ smooth: true, duration: 1000 });
   resumeSystem();
-});
-
-
-// Permite que otra parte de la app restaure (p.ej., al cerrar un modal)
-window.addEventListener('sim:resume-orbits', () => {
-  simulationPaused = false;
-  resetIsolation();
-  restoreEarthScale(earthItem?.mesh || null);
-  restoreDefaultView({ smooth: true, duration: 1000 });
 });
 
 // ———————————————————————————————————————
@@ -446,25 +457,28 @@ function iniciarSimulacion(mountEl) {
       }
     } catch {}
 
-    // Al abrir el panel (botón "Iniciar simulación" o click en Impactor2025)
-    window.addEventListener('sim:open-panel', () => {
-      // dejar visibles solo Impactor y Tierra
-      isolateKeep([impactorItem, earthItem], asteroidMeshes);
-
-      // congelar sistema mientras se edita
-      freezeSystem();
-
-      // NUEVO encuadre: target = punto medio, Tierra “grande” abajo-izquierda, Impactor en primer plano
-      zoomComposeMidpointAndCorner(
+    const openPanelHandler = () => {
+    isolateKeep([impactorItem, earthItem], asteroidMeshes);
+    freezeSystem();
+    zoomComposeMidpointAndCorner(
       impactorItem.mesh,
       earthItem?.mesh || null,
       camera,
       controls,
-      { distance: 0.6, lateral: 0.4, vertical: 0.2, earthScale: 1.6, duration: 1400 } // ← antes: distance 2.0, duration 1000
+      { distance: 0.6, lateral: 0.4, vertical: 0.2, earthScale: 1.6, duration: 1400 }
     );
+    showPanelFor(impactorItem);
+  };
+  if (impactorItem) addListener(window, 'sim:open-panel', openPanelHandler);
 
-      showPanelFor(impactorItem);
-    });
+  const resumeHandler = () => {
+    simulationPaused = false;
+    resetIsolation();
+    restoreEarthScale(earthItem?.mesh || null);
+    restoreDefaultView({ smooth: true, duration: 1000 });
+  };
+  addListener(window, 'sim:resume-orbits', resumeHandler);
+
   }
 
 
@@ -473,7 +487,7 @@ function iniciarSimulacion(mountEl) {
   const mouse = new THREE.Vector2();
   const el = renderer.domElement;
 
-  el.addEventListener('click', (e) => {
+  addListener(renderer.domElement, 'click', (e) => {
     const rect = el.getBoundingClientRect();
     mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -498,96 +512,125 @@ function iniciarSimulacion(mountEl) {
     isolate(item, asteroidMeshes);
   });
   
-// Reemplaza la función animate completa por:
-  let lastFrameMsLocal = performance.now();
-  function animate() {
-    _frameId = requestAnimationFrame(animate);
-    const now = performance.now();
-    const dt = now - lastFrameMsLocal;
-    lastFrameMsLocal = now;
+    // Reemplaza la función animate completa por:
+    let lastFrameMsLocal = performance.now();
+    function animate() {
+        _frameId = requestAnimationFrame(animate);
+        const now = performance.now();
+        const dt = now - lastFrameMsLocal;
+        lastFrameMsLocal = now;
 
-    if (!simulationPaused && !tabHidden) {
-      simDays += (dt/1000)*TIME_SCALE;
-    }
-    const tJulian = baseJulian + simDays;
-
-    for (const item of asteroidMeshes) {
-      if (!simulationPaused && !tabHidden) {
-        const { pos } = propagate(item.obj, tJulian);
-        item.mesh.position.copy(pos);
-      }
-      if (item.labelEl && item.labelEl.style.display === 'block') {
-        const sp = item.mesh.position.clone().project(camera);
-        if (sp.z < 1) {
-          const x = (sp.x*0.5+0.5)*window.innerWidth;
-          const y = (-sp.y*0.5+0.5)*window.innerHeight;
-            item.labelEl.style.left = `${x}px`;
-            item.labelEl.style.top  = `${y}px`;
-        } else {
-          item.labelEl.style.display = 'none';
+        if (!simulationPaused && !tabHidden) {
+            simDays += (dt/1000)*TIME_SCALE;
         }
+        const tJulian = baseJulian + simDays;
+
+        for (const item of asteroidMeshes) {
+            if (!simulationPaused && !tabHidden) {
+            const { pos } = propagate(item.obj, tJulian);
+            item.mesh.position.copy(pos);
+            }
+            if (item.labelEl && item.labelEl.style.display === 'block') {
+            const sp = item.mesh.position.clone().project(camera);
+            if (sp.z < 1) {
+                const x = (sp.x*0.5+0.5)*window.innerWidth;
+                const y = (-sp.y*0.5+0.5)*window.innerHeight;
+                item.labelEl.style.left = `${x}px`;
+                item.labelEl.style.top  = `${y}px`;
+            } else {
+                item.labelEl.style.display = 'none';
+            }
+            }
+        }
+        controls.update();
+        renderer.render(scene, camera);
+    }
+    animate();
+
+    // Listeners (guardar para cleanup)
+    _resizeHandler = () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+    addListener(window, 'resize', _resizeHandler);
+
+    _visibilityHandler = () => {
+        tabHidden = document.hidden;
+        if (!tabHidden) lastFrameMs = performance.now();
+    };
+    addListener(document, 'visibilitychange', _visibilityHandler);
+}
+
+function _internalCleanup(mountEl) {
+  simulationPaused = true;
+  if (_frameId) cancelAnimationFrame(_frameId);
+  _frameId = null;
+
+  // Listeners
+  _listeners.splice(0).forEach(fn => { try { fn(); } catch {} });
+
+  // Nodos DOM creados
+  _domNodes.forEach(n => { if (n?.parentNode) n.parentNode.removeChild(n); });
+  _domNodes.clear();
+
+  destroyInfoPanel();
+
+  if (_sceneRefs) {
+    const { scene, renderer } = _sceneRefs;
+    scene.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        if (Array.isArray(o.material)) o.material.forEach(m => m.dispose());
+        else o.material.dispose();
+      }
+    });
+    if (renderer) {
+      renderer.dispose();
+      if (mountEl && renderer.domElement?.parentNode === mountEl) {
+        mountEl.removeChild(renderer.domElement);
       }
     }
-    controls.update();
-    renderer.render(scene, camera);
   }
-  animate();
+  _sceneRefs = null;
+  resetModuleState();
+  _running = false;
+}
 
-  // Listeners (guardar para cleanup)
-  _resizeHandler = () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  };
-  window.addEventListener('resize', _resizeHandler);
+// Export opcional por si quieres forzar un stop manual desde consola
+export function stopHomeSimulation(mountEl) {
+  _internalCleanup(mountEl);
+}
 
-  _visibilityHandler = () => {
-    tabHidden = document.hidden;
-    if (!tabHidden) lastFrameMs = performance.now();
-  };
-  document.addEventListener('visibilitychange', _visibilityHandler);
+// Helper para saber si hay canvas vivo
+function _hasAliveRenderer(mountEl) {
+  return !!(_sceneRefs?.renderer && _sceneRefs.renderer.domElement &&
+            _sceneRefs.renderer.domElement.parentNode === mountEl);
 }
 
 export async function runHomeSimulation(mountEl) {
-  if (_running) return () => {};
+  // Si ya “está corriendo” pero no hay renderer vivo (limpieza parcial), libera y continúa
+  if (_running && !_hasAliveRenderer(mountEl)) {
+    _internalCleanup(mountEl);
+  }
+
+  // Si realmente sigue activo y en el mismo contenedor, no hacer nada
+  if (_running && _hasAliveRenderer(mountEl)) {
+    return () => _internalCleanup(mountEl);
+  }
+
   _running = true;
   try {
     await cargarAsteroides();
     iniciarSimulacion(mountEl);
   } catch (e) {
     console.error('No se pudo iniciar la simulación:', e);
-    _running = false;
+    _internalCleanup(mountEl);
     return () => {};
   }
 
-  return function cleanup() {
-    simulationPaused = true;
-    if (_frameId) cancelAnimationFrame(_frameId);
-    _frameId = null;
-
-    document.removeEventListener('visibilitychange', _visibilityHandler);
-    window.removeEventListener('resize', _resizeHandler);
-
-    const labels = document.getElementById('labels');
-    if (labels?.parentNode) labels.parentNode.removeChild(labels);
-
-    if (_sceneRefs) {
-      const { scene, renderer } = _sceneRefs;
-      scene.traverse(o => {
-        if (o.geometry) o.geometry.dispose();
-        if (o.material) {
-          if (Array.isArray(o.material)) o.material.forEach(m => m.dispose());
-          else o.material.dispose();
-        }
-      });
-      renderer.dispose();
-      if (renderer.domElement && renderer.domElement.parentNode === mountEl) {
-        mountEl.removeChild(renderer.domElement);
-      }
-    }
-    _sceneRefs = null;
-    _running = false;
-  };
+  // Devuelve cleanup
+  return () => _internalCleanup(mountEl);
 }
 
 //Ejemplo de función de mandar datos de asteroides al back (por si guardamos cosas en BD)
