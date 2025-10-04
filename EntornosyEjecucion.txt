@@ -41,6 +41,8 @@ Archivos que NO deben subirse
     .env (credenciales/URLs reales)
     Builds (dist/) salvo que queráis adjuntarlos por alguna razón.
 
+--BUILDEAR FRONT
+npm run build
 
 --GUIA USO FRONT (alguien nuevo)
 //INSTALA NVM Y RECARGA LA SESION

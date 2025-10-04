@@ -1,6 +1,5 @@
 import * as THREE from 'https://esm.sh/three@0.160.0';
-
-const DEG2RAD = Math.PI / 180;
+import { DEG2RAD } from './asteroid_utils.js'
 
 export function solveKepler(M, e) {
   let E = M;
@@ -10,7 +9,7 @@ export function solveKepler(M, e) {
   return E;
 }
 
-export function keplerToCartesian(obj, tJulian) {
+export function propagate(obj, tJulian) {
   const mu = 0.01720209895**2;
   const n = Math.sqrt(mu / Math.pow(obj.a, 3));
   const M = (obj.M0*DEG2RAD + n*(tJulian - obj.epoch)) % (2*Math.PI);

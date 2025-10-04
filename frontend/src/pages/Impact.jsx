@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
-import ThreeScene from '../components/ThreeScene'
 import BackHomeButton from '../components/BackHomeButton'
 
 export default function Impacto() {
@@ -22,9 +21,6 @@ export default function Impacto() {
       <ul>
         {lista.map(a => <li key={a.name}>{a.name} – a={a.a} e={a.e}</li>)}
       </ul>
-      <div style={{height:400, border:'1px solid #ddd', marginTop:12}}>
-        <ThreeScene />
-      </div>
     </section>
   )
 }
