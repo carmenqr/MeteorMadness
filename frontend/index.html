@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>frontend</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+    <script>
+      (function () {
+        try {
+          const nav = performance.getEntriesByType('navigation')[0];
+          const isReload = nav && nav.type === 'reload'; // estándar moderno
+          // const isReload = performance.navigation.type === 1; // (deprecated, fallback)
+          if (isReload && location.pathname !== '/') {
+            location.replace('/'); // no añade al historial
+          }
+        } catch (e) {
+          // ignora errores
+        }
+      })();
+    </script>
+  </body>
+</html>
