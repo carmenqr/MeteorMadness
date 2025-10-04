@@ -334,7 +334,7 @@ export function showPanelFor(item) {
     });
     panelEl.querySelector('#btn-mitigate')?.addEventListener('click', () => {
       if (validateAndShow()) {
-        window.dispatchEvent(new CustomEvent('panel:navigate', { detail: '/mitigate' }));
+        window.dispatchEvent(new CustomEvent('panel:navigate', { detail: '/mitigation' }));
       }
     });
 
