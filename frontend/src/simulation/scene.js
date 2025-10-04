@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import sunUrl from '../assets/sun.jpg'
+import backgroundUrl from '../assets/stars.jpg'
 
 export function createScene(mountNode = null) {
   const container = mountNode ?? document.createElement('div')
@@ -11,6 +12,17 @@ export function createScene(mountNode = null) {
 
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x000000)
+  new THREE.TextureLoader().load(
+    backgroundUrl,
+    tex => {
+      tex.colorSpace = THREE.SRGBColorSpace
+      // Si quieres también usarlo como envMap para un leve ambient:
+      tex.mapping = THREE.EquirectangularReflectionMapping
+      scene.background = tex
+    },
+    undefined,
+    err => console.warn('No se pudo cargar fondo estrellas', err)
+  )
 
   const width = container.clientWidth || window.innerWidth
   const height = container.clientHeight || window.innerHeight
@@ -38,6 +50,34 @@ export function createScene(mountNode = null) {
   controls.enablePan = true
   controls.enableZoom = true
   controls.target.set(0, 0, 0)
+
+  const STAR_COUNT = 1500;         // número de estrellas
+  const SHELL_RADIUS = 22;         // radio medio (antes ~50*0.8=40)
+  const SHELL_THICKNESS = 4;       // grosor del “cascarón” (antes rango 20)
+  // Si quieres aún más concentración reduce SHELL_THICKNESS (p.ej. 2)
+  const starsGeom = new THREE.BufferGeometry();
+  const positions = new Float32Array(STAR_COUNT * 3);
+  for (let i = 0; i < STAR_COUNT; i++) {
+    // Bias cuadrático para concentrar un poco más hacia el radio central
+    const t = Math.pow(Math.random(), 1.8); // >1.0 → más peso cerca del centro del grosor
+    const r = SHELL_RADIUS + (t - 0.5) * SHELL_THICKNESS;
+
+    // Distribución angular uniforme en la esfera
+    const u = Math.random() * 2 - 1;        // cos(theta)
+    const theta = Math.acos(u);
+    const phi = 2 * Math.PI * Math.random();
+
+    const sinT = Math.sin(theta);
+    positions[i * 3 + 0] = r * sinT * Math.cos(phi);
+    positions[i * 3 + 1] = r * u;           // u = cos(theta)
+    positions[i * 3 + 2] = r * sinT * Math.sin(phi);
+  }
+  starsGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const stars = new THREE.Points(
+    starsGeom,
+    new THREE.PointsMaterial({ color: 0xffffff, size: 0.06, sizeAttenuation: true })
+  );
+  scene.add(stars);
 
   // El Sol NO recibe luz: MeshBasicMaterial ignora luces (actúa como emisor)
   const R = 0.05 // radio del sol en tu escena

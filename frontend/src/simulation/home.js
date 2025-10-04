@@ -385,7 +385,14 @@ function iniciarSimulacion(mountEl) {
   if (earthData) {
     try {
       const geomE = new THREE.SphereGeometry(0.09, 64, 64);
-      const matE = new THREE.MeshBasicMaterial({ map: earthTex });
+      const matE = new THREE.MeshPhongMaterial({
+       map: earthTex,
+       flatShading: false,
+       shininess: 8,
+       specular: 0x222222,
+       emissive: 0x0a0f1a,
+       emissiveIntensity: 0.22
+     });
       const meshE = new THREE.Mesh(geomE, matE);
       meshE.name = earthData.name || 'Earth';
 
