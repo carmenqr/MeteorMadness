@@ -3,6 +3,9 @@ import { useParams, useNavigate } from "react-router-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
+// traer los parámetros del formulario
+import { calcularImpacto } from "../simulation/impact-utils.js";
+
 // --- MMI palette / descriptions adapted for impact shaking ---
 const mmiBreaks = [
   { max: 1.9, label: "I", color: "#edf8fb", desc: "Not felt / instrumental detection only." },
@@ -110,10 +113,7 @@ $$`;
 // --- Minimal Markdown renderer for bold + code + line breaks ---
 function MiniMarkdown({ text }) {
   const escape = (s) =>
-    s
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const html = escape(text)
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/`([^`]+)`/g, "<code>$1</code>")
@@ -313,39 +313,105 @@ function parseLosses(lossesJson) {
   return { fatalitiesTotal, dollarsTotal, perCountry };
 }
 
-// --- NEW: crater helpers ---
-function calculateCraterDiameter() {
-  // Static demo parameters
-  const Dimp = 100; // m
-  const rhoImp = 3000; // kg/m3
-  const rhoTar = 2500; // kg/m3
-  const v = 20000; // m/s
-  const g = 9.81; // m/s2
-  const theta = 45 * Math.PI / 180; // rad
-
-  const Dtr = 1.16 *
-    Math.pow(rhoImp / rhoTar, 1 / 3) *
+/** ============================
+ *  CRÁTER
+ *  ============================*/
+function diameterFromMassDensity(massKg, densityKgM3) {
+  if (!massKg || !densityKgM3) return null;
+  const D = Math.pow((6 * massKg) / (Math.PI * densityKgM3), 1 / 3);
+  return D; // m
+}
+function calcCraterFromInputs({
+  massKg, densityKgM3, velocidadMps,
+  targetDensity = 2500, angleDeg = 45, g = 9.81
+}) {
+  const Dimp = diameterFromMassDensity(massKg, densityKgM3);
+  if (!Dimp || !velocidadMps) return null;
+  const theta = (angleDeg * Math.PI) / 180;
+  const Dtr =
+    1.16 *
+    Math.pow(densityKgM3 / targetDensity, 1 / 3) *
     Math.pow(Dimp, 0.78) *
-    Math.pow(v, 0.44) *
+    Math.pow(velocidadMps, 0.44) *
     Math.pow(g, -0.22) *
     Math.pow(Math.sin(theta), 1 / 3);
+  const Dfin = 1.25 * Dtr;
+  return { Dtr, Dfin, Dimp, angleDeg, targetDensity };
+}
 
-  const Dfin = 1.25 * Dtr; // final ≈ 1.25 * transient
-  return { Dtr, Dfin };
+/** ============================
+ *  FUEGO (dosis térmica ~ 1/R^2)
+ *  ============================*/
+function calcFireRingRadius({ energiaJ, fRad = 0.03, Qt_kJ_m2 = 8, attenuation = 1.0 }) {
+  if (!energiaJ || energiaJ <= 0) return null;
+  const Qt = Qt_kJ_m2 * 1000; // J/m^2
+  const effE = energiaJ * fRad * attenuation;
+  const R = Math.sqrt(effE / (4 * Math.PI * Qt)); // m
+  if (!Number.isFinite(R) || R <= 0) return null;
+  return { Rfire_m: R, fRad, Qt_kJ_m2, attenuation };
+}
+
+/** ============================
+ *  ONDA DE CHOQUE (sobrepresión)
+ *  ============================*/
+// P_psi(Z) ≈ 8080/Z^3 + 114/Z^2 + 1/Z  → P_kPa = P_psi * 6.89476
+const PSI_TO_KPA = 6.89476;
+function peakOverpressure_kPa_from_Z(Z) {
+  if (Z <= 0) return Infinity;
+  const Ppsi = 8080 / (Z ** 3) + 114 / (Z ** 2) + 1 / Z;
+  return Ppsi * PSI_TO_KPA;
+}
+// Invertir para hallar Z dado P_kPa (búsqueda binaria)
+function invertZforPressure_kPa(target_kPa) {
+  if (!Number.isFinite(target_kPa) || target_kPa <= 0) return null;
+  let lo = 0.02, hi = 50; // rango típico
+  for (let i = 0; i < 80; i++) {
+    const mid = 0.5 * (lo + hi);
+    const P = peakOverpressure_kPa_from_Z(mid);
+    if (P > target_kPa) lo = mid; else hi = mid;
+  }
+  return 0.5 * (lo + hi);
+}
+// Radio del anillo para umbral de sobrepresión
+// 1 kg TNT = 4.184 MJ  → W_kg = E / 4.184e6
+function calcShockRingRadius({ energiaJ, Pth_kPa = 30 }) {
+  if (!energiaJ || energiaJ <= 0) return null;
+  const Wkg = energiaJ / 4.184e6;
+  if (!Number.isFinite(Wkg) || Wkg <= 0) return null;
+  const Z = invertZforPressure_kPa(Pth_kPa);
+  if (!Z) return null;
+  const R = Z * Math.cbrt(Wkg); // metros
+  const yield_kt = energiaJ / 4.184e12; // kilotones TNT
+  return { Rshock_m: R, Pth_kPa, yield_kt };
 }
 
 export default function ImpactMMI() {
   const { eventId: routeEventId } = useParams();
   const eventId = routeEventId || "us6000rcqw"; // demo default
+
   const mapRef = useRef(null);
   const containerRef = useRef(null);
   const groupRef = useRef(null);
   const contoursLayerRef = useRef(null);
 
-  // NEW: crater management
+  // Crater
   const craterLayerRef = useRef(null);
-  const impactLatLonRef = useRef(null); // keep last impact center for crater
+  const impactLatLonRef = useRef(null);
   const [craterVisible, setCraterVisible] = useState(true);
+
+  // Fire
+  const fireLayerRef = useRef(null);
+  const [fireVisible, setFireVisible] = useState(true);
+  const [fireParams, setFireParams] = useState(null);
+
+  // Shock
+  const shockLayerRef = useRef(null);
+  const [shockVisible, setShockVisible] = useState(true);
+  const [shockParams, setShockParams] = useState(null); // {Rshock_m, Pth_kPa, yield_kt}
+
+  // Inputs + crater dims
+  const [impactInputs, setImpactInputs] = useState(null);
+  const [craterDims, setCraterDims] = useState(null);
 
   const navigate = useNavigate();
 
@@ -363,14 +429,13 @@ export default function ImpactMMI() {
   const [losses, setLosses] = useState(null);
   const [lossLoading, setLossLoading] = useState(false);
   const [lossError, setLossError] = useState(null);
-
   const [histUrls, setHistUrls] = useState({ fatal: null, econ: null });
 
   // Tsunami (static)
   const [tsuOpen, setTsuOpen] = useState(false);
   const tsuStatus = { level: "no_threat", label: "No tsunami threat" };
 
-  // Create map once
+  // 1) Cargar mapa una vez
   useEffect(() => {
     if (!mapRef.current && containerRef.current) {
       const map = L.map(containerRef.current, { zoomControl: true }).setView([20, 0], 2);
@@ -395,7 +460,7 @@ export default function ImpactMMI() {
     }
   }, []);
 
-  // Invalidate after drawer animation so Leaflet reflows tiles
+  // 2) Invalidate tras animación del drawer
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -403,51 +468,103 @@ export default function ImpactMMI() {
     return () => clearTimeout(t);
   }, [drawerOpen]);
 
-  // Helper to (re)draw crater ring
-  const drawCraterRing = (lat, lon) => {
-    const map = mapRef.current;
-    const group = groupRef.current;
-    if (!map || !group) return;
+  // 3) Leer parámetros del formulario al entrar
+  useEffect(() => {
+    const res = calcularImpacto();
+    setImpactInputs(res || null);
 
-    // Remove existing crater if any
-    if (craterLayerRef.current) {
-      group.removeLayer(craterLayerRef.current);
-      craterLayerRef.current = null;
+    if (res) {
+      const crater = calcCraterFromInputs({
+        massKg: res.masaKg,
+        densityKgM3: res.densidadKgM3,
+        velocidadMps: res.velocidadMps,
+        targetDensity: 2500,
+        angleDeg: 45,
+        g: 9.81
+      });
+      setCraterDims(crater);
+
+      const fire = calcFireRingRadius({ energiaJ: res.energiaJ, fRad: 0.03, Qt_kJ_m2: 8, attenuation: 1.0 });
+      setFireParams(fire);
+
+      const shock = calcShockRingRadius({ energiaJ: res.energiaJ, Pth_kPa: 30 });
+      setShockParams(shock);
+    } else {
+      setCraterDims(null);
+      setFireParams(null);
+      setShockParams(null);
     }
+  }, [eventId]);
 
-    if (!craterVisible) return;
+  // Helpers de dibujo
+  const drawCraterRing = (lat, lon) => {
+    const map = mapRef.current, group = groupRef.current;
+    if (!map || !group) return;
+    if (craterLayerRef.current) { group.removeLayer(craterLayerRef.current); craterLayerRef.current = null; }
+    if (!craterVisible || !craterDims) return;
 
-    const { Dfin } = calculateCraterDiameter();
-    const radiusMeters = Math.max(1, Dfin / 2); // ensure >= 1 m
-
+    const radiusMeters = Math.max(1, craterDims.Dfin / 2);
     const craterCircle = L.circle([lat, lon], {
-      radius: radiusMeters,
-      color: "#111",
-      weight: 2,
-      opacity: 0.85,
-      fillColor: "#ff3b30",
-      fillOpacity: 0.15
+      radius: radiusMeters, color: "#111", weight: 2, opacity: 0.9, fillColor: "#ff3b30", fillOpacity: 0.15
     });
-
     craterCircle.bindTooltip(
-      `Crater ring (final) ≈ ${Dfin.toFixed(1)} m diameter`,
-      { direction: "top", permanent: false, opacity: 0.9 }
+      `Crater ring (final) ≈ ${craterDims.Dfin.toFixed(1)} m (Impactor ≈ ${craterDims.Dimp.toFixed(1)} m)`,
+      { direction: "top", permanent: false, opacity: 0.95 }
     );
-
     craterCircle.addTo(group);
     craterLayerRef.current = craterCircle;
   };
 
-  // Load event + contours + PAGER/losspager JSONs/PNGs
+  const drawFireRing = (lat, lon) => {
+    const map = mapRef.current, group = groupRef.current;
+    if (!map || !group) return;
+    if (fireLayerRef.current) { group.removeLayer(fireLayerRef.current); fireLayerRef.current = null; }
+    if (!fireVisible || !fireParams) return;
+
+    const ring = L.circle([lat, lon], {
+      radius: fireParams.Rfire_m, color: "#ff6b00", weight: 2, opacity: 0.9, fillColor: "#ff9f43", fillOpacity: 0.12
+    });
+    ring.bindTooltip(
+      `Thermal ring ≈ ${(fireParams.Rfire_m / 1000).toFixed(2)} km<br>` +
+      `Dose ≥ ${fireParams.Qt_kJ_m2} kJ/m² · f_rad=${fireParams.fRad}`,
+      { direction: "top", permanent: false, opacity: 0.95 }
+    );
+    ring.addTo(group);
+    fireLayerRef.current = ring;
+  };
+
+  const drawShockRing = (lat, lon) => {
+    const map = mapRef.current, group = groupRef.current;
+    if (!map || !group) return;
+    if (shockLayerRef.current) { group.removeLayer(shockLayerRef.current); shockLayerRef.current = null; }
+    if (!shockVisible || !shockParams) return;
+
+    const ring = L.circle([lat, lon], {
+      radius: shockParams.Rshock_m,
+      color: "#2563eb",
+      weight: 2,
+      opacity: 0.95,
+      fillColor: "#93c5fd",
+      fillOpacity: 0.12
+    });
+    ring.bindTooltip(
+      `Shock ring ≈ ${(shockParams.Rshock_m / 1000).toFixed(2)} km<br>` +
+      `Overpressure ≥ ${shockParams.Pth_kPa} kPa (≈ ${(shockParams.Pth_kPa / 6.89476).toFixed(2)} psi)` +
+      `<br>Yield ≈ ${shockParams.yield_kt.toFixed(2)} kt TNT`,
+      { direction: "top", permanent: false, opacity: 0.95 }
+    );
+    ring.addTo(group);
+    shockLayerRef.current = ring;
+  };
+
+  // 4) Cargar evento + dibujar capas + anillos
   useEffect(() => {
-    const map = mapRef.current;
-    const group = groupRef.current;
+    const map = mapRef.current, group = groupRef.current;
     if (!map || !group) return;
 
     group.clearLayers();
     contoursLayerRef.current = null;
 
-    // reset slices
     setExposureTotals(null);
     setCities([]);
     setPopError(null);
@@ -467,7 +584,6 @@ export default function ImpactMMI() {
         const detail = await fetchJson(DETAIL_URL);
         if (abort) return;
 
-        // Impact proxy point
         const [lon, lat, depth] = detail.geometry.coordinates;
         const whenISO = new Date(detail.properties.time).toISOString();
         const mag = detail.properties.mag;
@@ -476,7 +592,6 @@ export default function ImpactMMI() {
         setImpactInfo({ magnitude: mag, place, whenISO });
         impactLatLonRef.current = { lat, lon };
 
-        // Impact marker with a nicer popup including an image
         L.circleMarker([lat, lon], {
           radius: 6, weight: 2, color: "#111", fillColor: "#ffcc00", fillOpacity: 0.9
         })
@@ -494,10 +609,12 @@ export default function ImpactMMI() {
           )
           .addTo(group);
 
-        // Draw crater ring (new)
+        // Anillos
         drawCraterRing(lat, lon);
+        drawFireRing(lat, lon);
+        drawShockRing(lat, lon);
 
-        // Shake-style MMI contours
+        // MMI contours
         const shakemap = (detail.properties?.products?.shakemap || [])[0];
         if (shakemap?.contents) {
           const contKey = Object.keys(shakemap.contents).find(k =>
@@ -532,7 +649,7 @@ export default function ImpactMMI() {
           }
         }
 
-        // Fit to layers
+        // Fit
         if (!abort) {
           if (group.getLayers().length > 0) {
             map.fitBounds(group.getBounds().pad(0.2));
@@ -542,7 +659,7 @@ export default function ImpactMMI() {
           map.invalidateSize();
         }
 
-        // === Load PAGER/losspager JSONs/PNGs ===
+        // === PAGER / losspager ===
         const pager = (detail.properties?.products?.losspager
           ?? detail.properties?.products?.pager
           ?? [])[0];
@@ -588,38 +705,24 @@ export default function ImpactMMI() {
           if (!abort) {
             if (exposureJson) setExposureTotals(aggregateExposure(exposureJson));
             if (cityJson) setCities(normalizeCities(cityJson));
-            if (!exposureJson && !cityJson) {
-              setPopError("No PAGER exposure/cities JSON found. Check console keys.");
-            }
-
-            if (lossesJson) {
-              setLosses(parseLosses(lossesJson));
-            } else if (lossesUrl) {
-              setLossError("Could not load losses.json");
-            }
-
+            if (!exposureJson && !cityJson) setPopError("No PAGER exposure/cities JSON found.");
+            if (lossesJson) setLosses(parseLosses(lossesJson)); else if (lossesUrl) setLossError("Could not load losses.json");
             setHistUrls({ fatal: fatalPng || null, econ: econPng || null });
           }
         } else {
           setPopError("No losspager product available for this event.");
         }
       } catch (e) {
-        if (!abort) {
-          console.error(e);
-          setPopError(e.message || String(e));
-        }
+        if (!abort) { console.error(e); setPopError(e.message || String(e)); }
       } finally {
-        if (!abort) {
-          setPopLoading(false);
-          setLossLoading(false);
-        }
+        if (!abort) { setPopLoading(false); setLossLoading(false); }
       }
     })();
 
     return () => { abort = true; };
-  }, [eventId, selectedLabel, craterVisible]); // NOTE: re-draw crater if visibility changes
+  }, [eventId, selectedLabel, craterVisible, craterDims, fireVisible, fireParams, shockVisible, shockParams]);
 
-  // Restyle when MMI filter changes (no refetch)
+  // Restyle MMI (no refetch)
   useEffect(() => {
     const layer = contoursLayerRef.current;
     if (!layer) return;
@@ -638,26 +741,54 @@ export default function ImpactMMI() {
     });
   }, [selectedLabel]);
 
-  // When craterVisible toggles, redraw crater at last known impact center
+  // Redibujar anillos cuando cambien
   useEffect(() => {
-    const center = impactLatLonRef.current;
-    if (!center) return;
-    drawCraterRing(center.lat, center.lon);
-  }, [craterVisible]);
+    const c = impactLatLonRef.current; if (!c) return;
+    drawCraterRing(c.lat, c.lon);
+  }, [craterVisible, craterDims]);
 
-  // UI helpers
+  useEffect(() => {
+    const c = impactLatLonRef.current; if (!c) return;
+    drawFireRing(c.lat, c.lon);
+  }, [fireVisible, fireParams]);
+
+  useEffect(() => {
+    const c = impactLatLonRef.current; if (!c) return;
+    drawShockRing(c.lat, c.lon);
+  }, [shockVisible, shockParams]);
+
+  // Helpers de UI
   const mmiOptions = useMemo(() => labelOrder.map(lab => ({
-    label: lab,
-    color: mmiBreaks.find(b => b.label === lab)?.color
+    label: lab, color: mmiBreaks.find(b => b.label === lab)?.color
   })), []);
   const totalPeople = useMemo(() => {
     if (!exposureTotals) return 0;
     return Object.values(exposureTotals).reduce((a, b) => a + (Number(b) || 0), 0);
   }, [exposureTotals]);
-  const fmtUSD0 = (n) =>
-    Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  const fmtUSD0 = (n) => Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
 
-  const { Dtr, Dfin } = calculateCraterDiameter();
+  // Refrescar desde el formulario
+  const refreshFromForm = () => {
+    const res = calcularImpacto();
+    setImpactInputs(res || null);
+
+    if (res) {
+      setCraterDims(
+        calcCraterFromInputs({
+          massKg: res.masaKg, densityKgM3: res.densidadKgM3, velocidadMps: res.velocidadMps,
+          targetDensity: 2500, angleDeg: 45, g: 9.81
+        })
+      );
+      setFireParams(
+        calcFireRingRadius({ energiaJ: res.energiaJ, fRad: 0.03, Qt_kJ_m2: 8, attenuation: 1.0 })
+      );
+      setShockParams(
+        calcShockRingRadius({ energiaJ: res.energiaJ, Pth_kPa: 30 })
+      );
+    } else {
+      setCraterDims(null); setFireParams(null); setShockParams(null);
+    }
+  };
 
   return (
     <div style={{ position: "fixed", inset: 0 }}>
@@ -700,8 +831,8 @@ export default function ImpactMMI() {
         style={{
           position: "absolute",
           top: 0,
-          left: drawerOpen ? 0 : -320,
-          width: 320,
+          left: drawerOpen ? 0 : -340,
+          width: 340,
           height: "100%",
           transition: "left .25s ease",
           background: "#ffffff",
@@ -717,21 +848,51 @@ export default function ImpactMMI() {
       >
         <h3 style={{ margin: "6px 0 10px" }}>Impact Consequences</h3>
 
-        {/* Step 1: Ground shaking (MMI) */}
+        {/* (A) Form parameters */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Form parameters</div>
+
+          {!impactInputs ? (
+            <div style={{ fontSize: 12, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", padding: 8, borderRadius: 8 }}>
+              No form data available. Go to the input panel and set mass, speed and density.
+            </div>
+          ) : (
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10, background: "#f8fafc" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <div><strong>Mass</strong><br />{impactInputs.masaKg.toLocaleString()} kg</div>
+                <div><strong>Density</strong><br />{impactInputs.densidadKgM3.toLocaleString()} kg/m³</div>
+                <div><strong>Speed</strong><br />{impactInputs.velocidadKms} km/s ({impactInputs.velocidadMps.toLocaleString()} m/s)</div>
+                <div><strong>Energy</strong><br />{impactInputs.energiaJ.toLocaleString()} J</div>
+              </div>
+
+              {craterDims && (
+                <div style={{ marginTop: 8 }}>
+                  <div><strong>Estimated impactor diameter</strong>: {craterDims.Dimp.toFixed(1)} m</div>
+                </div>
+              )}
+
+              <div style={{ marginTop: 8 }}>
+                <button onClick={refreshFromForm}
+                  style={{
+                    fontSize: 12, padding: "6px 10px", borderRadius: 8, cursor: "pointer",
+                    border: "1px solid rgba(0,0,0,.15)", background: "#fff"
+                  }}>
+                  Refresh from form
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* (1) MMI */}
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>1) Ground shaking (MMI)</div>
-          <div style={{ marginBottom: 6, opacity: .8 }}>
-            “What does this intensity feel like?”
-          </div>
-          <InfoNote title="Explanation (MMI)">
-            <MiniMarkdown text={HELP.mmi} />
-          </InfoNote>
+          <div style={{ marginBottom: 6, opacity: .8 }}>“What does this intensity feel like?”</div>
+          <InfoNote title="Explanation (MMI)"><MiniMarkdown text={HELP.mmi} /></InfoNote>
 
-          {/* MMI selector */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6 }}>
             {mmiOptions.map(opt => (
-              <button
-                key={opt.label}
+              <button key={opt.label}
                 onClick={() => setSelectedLabel(prev => prev === opt.label ? null : opt.label)}
                 title={`MMI ${opt.label}`}
                 style={{
@@ -741,14 +902,12 @@ export default function ImpactMMI() {
                   background: opt.color,
                   cursor: "pointer",
                   fontWeight: 600
-                }}
-              >
+                }}>
                 {opt.label}
               </button>
             ))}
           </div>
 
-          {/* Selection description */}
           <div style={{ marginTop: 10, minHeight: 48, background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
             {selectedLabel ? (
               <>
@@ -766,25 +925,18 @@ export default function ImpactMMI() {
           </div>
         </div>
 
-        {/* Step 2: Exposed population */}
+        {/* (2) Exposed population */}
         <div style={{ marginTop: 18 }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>2) Exposed population</div>
+          <InfoNote title="How is exposure estimated?"><MiniMarkdown text={HELP.exposure} /></InfoNote>
 
-          <InfoNote title="How is exposure estimated?">
-            <MiniMarkdown text={HELP.exposure} />
-          </InfoNote>
-
-          {popLoading && (
-            <div style={{ fontSize: 12, opacity: .8 }}>Loading exposure data…</div>
-          )}
-
+          {popLoading && <div style={{ fontSize: 12, opacity: .8 }}>Loading exposure data…</div>}
           {popError && (
             <div style={{ fontSize: 12, color: "#b91c1c", background: "#fee2e2", border: "1px solid #fecaca", padding: 8, borderRadius: 8 }}>
               Could not load population data: {popError}
             </div>
           )}
 
-          {/* Exposure totals by MMI */}
           {exposureTotals && (
             <div style={{ marginTop: 8 }}>
               <div style={{ fontSize: 13, marginBottom: 6, opacity: .75 }}>
@@ -793,10 +945,8 @@ export default function ImpactMMI() {
               <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead style={{ background: "#f8fafc" }}>
-                    <tr>
-                      <th style={{ textAlign: "left", padding: "6px 8px" }}>MMI</th>
-                      <th style={{ textAlign: "right", padding: "6px 8px" }}>People</th>
-                    </tr>
+                    <tr><th style={{ textAlign: "left", padding: "6px 8px" }}>MMI</th>
+                      <th style={{ textAlign: "right", padding: "6px 8px" }}>People</th></tr>
                   </thead>
                   <tbody>
                     {labelOrder.map((lab) => (
@@ -810,87 +960,31 @@ export default function ImpactMMI() {
                     <tr style={{ borderTop: "2px solid #e2e8f0", background: "#fafafa" }}>
                       <td style={{ padding: "6px 8px", fontWeight: 700 }}>Total</td>
                       <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 700 }}>
-                        {totalPeople.toLocaleString()}
+                        {Object.values(exposureTotals).reduce((a, b) => a + (Number(b) || 0), 0).toLocaleString()}
                       </td>
                     </tr>
                   </tbody>
                 </table>
               </div>
-
-              {!!cities.length && (
-                <div style={{ marginTop: 14 }}>
-                  <div style={{ fontSize: 13, marginBottom: 6, opacity: .75 }}>
-                    Affected cities (top 10 by population)
-                  </div>
-                  <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                      <thead style={{ background: "#f8fafc" }}>
-                        <tr>
-                          <th style={{ textAlign: "left", padding: "6px 8px" }}>City</th>
-                          <th style={{ textAlign: "left", padding: "6px 8px" }}>Country/Region</th>
-                          <th style={{ textAlign: "right", padding: "6px 8px" }}>Population</th>
-                          <th style={{ textAlign: "center", padding: "6px 8px" }}>MMI</th>
-                          <th style={{ textAlign: "right", padding: "6px 8px" }}>Dist (km)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {cities
-                          .slice()
-                          .sort((a, b) => (b.population || 0) - (a.population || 0))
-                          .slice(0, 10)
-                          .map((c, idx) => (
-                            <tr key={`${c.name}-${idx}`} style={{ borderTop: "1px solid #f1f5f9" }}>
-                              <td style={{ padding: "6px 8px" }}>{c.name}</td>
-                              <td style={{ padding: "6px 8px" }}>{c.country || "—"}</td>
-                              <td style={{ padding: "6px 8px", textAlign: "right" }}>{(c.population || 0).toLocaleString()}</td>
-                              <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: 600 }}>{c.mmi || "—"}</td>
-                              <td style={{ padding: "6px 8px", textAlign: "right" }}>
-                                {Number.isFinite(c.distance) ? c.distance.toFixed(1) : "—"}
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <InfoNote title="What does the cities table mean?">
-                    <MiniMarkdown text={HELP.cities} />
-                  </InfoNote>
-                </div>
-              )}
             </div>
           )}
 
-          {/* Fatality histogram under Step 2 */}
           {histUrls.fatal && (
             <div style={{ marginTop: 14 }}>
               <div style={{ fontSize: 13, marginBottom: 6, opacity: .75 }}>
                 Fatality Alert Histogram (empirical probabilities)
               </div>
-              <img
-                src={histUrls.fatal}
-                alt="PAGER Fatality Alert Histogram"
-                style={{
-                  width: "100%",
-                  height: "auto",
-                  display: "block",
-                  borderRadius: 10,
-                  border: "1px solid #e5e7eb",
-                  background: "#fafafa"
-                }}
-                loading="lazy"
-              />
+              <img src={histUrls.fatal} alt="PAGER Fatality Alert Histogram"
+                style={{ width: "100%", height: "auto", display: "block", borderRadius: 10, border: "1px solid #e5e7eb", background: "#fafafa" }}
+                loading="lazy" />
             </div>
           )}
         </div>
 
-        {/* Step 3: Economic & fatality risk */}
+        {/* (3) Economic & fatality risk */}
         <div style={{ marginTop: 18 }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>3) Economic & fatality risk</div>
-
-          <InfoNote title="How to interpret losses and the histogram">
-            <MiniMarkdown text={HELP.losses} />
-          </InfoNote>
+          <InfoNote title="How to interpret losses and the histogram"><MiniMarkdown text={HELP.losses} /></InfoNote>
 
           {lossLoading && <div style={{ fontSize: 12, opacity: .8 }}>Loading losses…</div>}
           {lossError && (
@@ -918,9 +1012,7 @@ export default function ImpactMMI() {
 
               {!!losses.perCountry.length && (
                 <div style={{ marginTop: 12 }}>
-                  <div style={{ fontSize: 13, marginBottom: 6, opacity: .75 }}>
-                    By country (sorted by economic loss)
-                  </div>
+                  <div style={{ fontSize: 13, marginBottom: 6, opacity: .75 }}>By country (sorted by economic loss)</div>
                   <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                       <thead style={{ background: "#f8fafc" }}>
@@ -934,12 +1026,8 @@ export default function ImpactMMI() {
                         {losses.perCountry.map((row, idx) => (
                           <tr key={row.code + idx} style={{ borderTop: "1px solid #f1f5f9" }}>
                             <td style={{ padding: "6px 8px" }}>{row.code}</td>
-                            <td style={{ padding: "6px 8px", textAlign: "right" }}>
-                              {Number(row.fatalities || 0).toLocaleString()}
-                            </td>
-                            <td style={{ padding: "6px 8px", textAlign: "right" }}>
-                              {fmtUSD0(row.dollars)}
-                            </td>
+                            <td style={{ padding: "6px 8px", textAlign: "right" }}>{Number(row.fatalities || 0).toLocaleString()}</td>
+                            <td style={{ padding: "6px 8px", textAlign: "right" }}>{fmtUSD0(row.dollars)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -954,12 +1042,8 @@ export default function ImpactMMI() {
                     Model uncertainty — Economic Alert Histogram
                   </div>
                   <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10, background: "#fff" }}>
-                    <img
-                      src={histUrls.econ}
-                      alt="PAGER Economic Alert Histogram"
-                      style={{ width: "100%", height: "auto", display: "block", borderRadius: 8 }}
-                      loading="lazy"
-                    />
+                    <img src={histUrls.econ} alt="PAGER Economic Alert Histogram"
+                      style={{ width: "100%", height: "auto", display: "block", borderRadius: 8 }} loading="lazy" />
                   </div>
                 </div>
               )}
@@ -967,73 +1051,180 @@ export default function ImpactMMI() {
           )}
         </div>
 
-        {/* Step 3.5: Crater size */}
+        {/* (4) Cráter */}
         <div style={{ marginTop: 18 }}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>3.5) Crater size estimation</div>
-
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>4) Crater size estimation</div>
           <InfoNote title="How is crater size estimated?">
             <MiniMarkdown text={`
-We use the **Holsapple–Schmidt scaling law** to estimate the diameter of the crater:
+We use the **Holsapple–Schmidt scaling law** using impactor **mass, density, speed**, impact angle, target density and gravity.
 
-- Inputs: impactor size, density, velocity, angle, target density, and gravity.  
-- Formula gives a **transient crater** (initial excavation).  
-- Final crater is ~25% larger.  
+- We derive **impactor diameter** from mass & density:  m = ρ·(π/6)·D³  ⇒  D = (6m / (πρ))^(1/3)
+- The formula gives a **transient crater** (D_tr).  
+- Final crater ≈ **1.25 × D_tr**.
 
-⚠️ Here values are **static demo parameters** (asteroid: 100 m, 20 km/s, 45° impact).
-    `} />
+In this view, we read mass/speed/density from the **form**, and use angle=45°, ρ_target=2500 kg/m³, g=9.81 m/s².
+            `} />
           </InfoNote>
 
           <div style={{ marginTop: 8, border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
-            <div><strong>Transient crater:</strong> {Dtr.toFixed(1)} m</div>
-            <div><strong>Final crater:</strong> {Dfin.toFixed(1)} m</div>
+            {!craterDims ? (
+              <div style={{ fontSize: 12, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", padding: 8, borderRadius: 8 }}>
+                Missing form data to compute crater. Please fill the mass, speed and density.
+              </div>
+            ) : (
+              <>
+                <div><strong>Impactor diameter:</strong> {craterDims.Dimp.toFixed(1)} m</div>
+                <div><strong>Transient crater:</strong> {craterDims.Dtr.toFixed(1)} m</div>
+                <div><strong>Final crater:</strong> {craterDims.Dfin.toFixed(1)} m</div>
+                <div style={{ fontSize: 12, opacity: .7, marginTop: 4 }}>
+                  (angle = {craterDims.angleDeg}°, target density = {craterDims.targetDensity} kg/m³)
+                </div>
 
-            {/* NEW: toggle crater visibility */}
-            <button
-              onClick={() => setCraterVisible(v => !v)}
-              style={{
-                marginTop: 10,
-                fontSize: 12, padding: "6px 10px",
-                borderRadius: 8, cursor: "pointer",
-                border: "1px solid rgba(0,0,0,.15)", background: "#fff"
-              }}
-              title="Toggle crater ring on the map"
-            >
-              {craterVisible ? "Hide crater" : "Show crater"}
-            </button>
+                <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+                  <button onClick={() => setCraterVisible(v => !v)}
+                    style={{
+                      fontSize: 12, padding: "6px 10px", borderRadius: 8, cursor: "pointer",
+                      border: "1px solid rgba(0,0,0,.15)", background: "#fff"
+                    }}>
+                    {craterVisible ? "Hide crater" : "Show crater"}
+                  </button>
+
+                  <button onClick={refreshFromForm}
+                    style={{
+                      fontSize: 12, padding: "6px 10px", borderRadius: 8, cursor: "pointer",
+                      border: "1px solid rgba(0,0,0,.15)", background: "#fff"
+                    }}>
+                    Recompute from form
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
-        {/* Step 4: Tsunami (static bulletin) */}
+        {/* (4.5) Fuego */}
         <div style={{ marginTop: 18 }}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>4) Tsunami</div>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>5) Fire ring (thermal dose)</div>
+          <InfoNote title="How is the fire ring computed?">
+            <MiniMarkdown text={`
+We assume thermal radiation decays as **1/R²**.
+Radius where **dose** exceeds threshold \\(Q_t\\):
+
+\\( R = \\sqrt{\\dfrac{f_{rad}\\,E_k}{4\\pi\\,Q_t}} \\)
+
+- **E_k**: impact energy (from the form)
+- **f_rad**: fraction to thermal (demo: 0.03)
+- **Q_t**: ignition/burn threshold (typ. **5–10 kJ/m²**)
+            `} />
+          </InfoNote>
+
+          <div style={{ marginTop: 8, border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
+            {!fireParams ? (
+              <div style={{ fontSize: 12, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", padding: 8, borderRadius: 8 }}>
+                Missing form energy to compute the thermal ring.
+              </div>
+            ) : (
+              <>
+                <div><strong>Radius:</strong> {(fireParams.Rfire_m / 1000).toFixed(2)} km</div>
+                <div style={{ fontSize: 12, opacity: .7, marginTop: 4 }}>
+                  (Qt = {fireParams.Qt_kJ_m2} kJ/m² · f_rad = {fireParams.fRad})
+                </div>
+
+                <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+                  <button onClick={() => setFireVisible(v => !v)}
+                    style={{
+                      fontSize: 12, padding: "6px 10px", borderRadius: 8, cursor: "pointer",
+                      border: "1px solid rgba(0,0,0,.15)", background: "#fff"
+                    }}>
+                    {fireVisible ? "Hide fire ring" : "Show fire ring"}
+                  </button>
+
+                  <button onClick={refreshFromForm}
+                    style={{
+                      fontSize: 12, padding: "6px 10px", borderRadius: 8, cursor: "pointer",
+                      border: "1px solid rgba(0,0,0,.15)", background: "#fff"
+                    }}>
+                    Recompute from form
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* (5) Onda de choque */}
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>6) Shock wave (overpressure)</div>
+
+          <InfoNote title="How is overpressure radius computed?">
+            <MiniMarkdown text={`
+We use **scaled distance** \\(Z = R/W^{1/3}\\) with TNT equivalence.
+Peak overpressure (empirical) in **psi**:
+
+\\( P(Z) \\approx 8080/Z^3 + 114/Z^2 + 1/Z \\) → \\(P_{kPa} = 6.89476\\,P_{psi}\\).
+
+Given threshold \\(P_{th}\\), we numerically invert to find \\(Z\\) and then \\(R = Z W^{1/3}\\).
+Default \\(P_{th}=30\\,\\text{kPa}\\) (≈ 4.35 psi) ~ moderate structural damage.
+            `} />
+          </InfoNote>
+
+          <div style={{ marginTop: 8, border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
+            {!shockParams ? (
+              <div style={{ fontSize: 12, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", padding: 8, borderRadius: 8 }}>
+                Missing form energy to compute the shock ring.
+              </div>
+            ) : (
+              <>
+                <div><strong>Radius:</strong> {(shockParams.Rshock_m / 1000).toFixed(2)} km</div>
+                <div><strong>Threshold:</strong> {shockParams.Pth_kPa} kPa (≈ {(shockParams.Pth_kPa / 6.89476).toFixed(2)} psi)</div>
+                <div style={{ fontSize: 12, opacity: .7, marginTop: 4 }}>
+                  Yield ≈ {shockParams.yield_kt.toFixed(2)} kt TNT (energy equivalence)
+                </div>
+
+                <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+                  <button onClick={() => setShockVisible(v => !v)}
+                    style={{
+                      fontSize: 12, padding: "6px 10px", borderRadius: 8, cursor: "pointer",
+                      border: "1px solid rgba(0,0,0,.15)", background: "#fff"
+                    }}>
+                    {shockVisible ? "Hide shock ring" : "Show shock ring"}
+                  </button>
+
+                  <button onClick={refreshFromForm}
+                    style={{
+                      fontSize: 12, padding: "6px 10px", borderRadius: 8, cursor: "pointer",
+                      border: "1px solid rgba(0,0,0,.15)", background: "#fff"
+                    }}>
+                    Recompute from form
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* (6) Tsunami */}
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>7) Tsunami</div>
 
           <div style={{ fontSize: 13, opacity: .75, marginBottom: 6 }}>
             Static bulletin (CORS blocked live fetch). Source: <code>tsunami.gov</code>
           </div>
 
-          <InfoNote title="How to read a tsunami bulletin">
-            <MiniMarkdown text={HELP.tsunami} />
-          </InfoNote>
+          <InfoNote title="How to read a tsunami bulletin"><MiniMarkdown text={HELP.tsunami} /></InfoNote>
 
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10, background: "#fff", marginTop: 8 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
               <span style={badgeStyle(tsuStatus.level)}>{tsuStatus.label}</span>
               <div style={{ display: "flex", gap: 8 }}>
-                <a
-                  href="https://www.tsunami.gov/"
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ fontSize: 12, textDecoration: "underline" }}
-                >
+                <a href="https://www.tsunami.gov/" target="_blank" rel="noreferrer" style={{ fontSize: 12, textDecoration: "underline" }}>
                   Open tsunami.gov
                 </a>
-                <button
-                  onClick={() => setTsuOpen(v => !v)}
+                <button onClick={() => setTsuOpen(v => !v)}
                   style={{
                     fontSize: 12, padding: "6px 8px", borderRadius: 8,
                     border: "1px solid rgba(0,0,0,.15)", background: "#f8fafc", cursor: "pointer"
-                  }}
-                >
+                  }}>
                   {tsuOpen ? "Hide details" : "Show details"}
                 </button>
               </div>
@@ -1049,19 +1240,10 @@ We use the **Holsapple–Schmidt scaling law** to estimate the diameter of the c
               </pre>
             )}
           </div>
-
-          <div style={{ marginTop: 8, fontSize: 12, opacity: .65 }}>
-            Note: This is a didactic static message. For live data later, enable a backend proxy to bypass CORS and fetch TXT bulletins.
-          </div>
         </div>
 
-        <InfoNote title="How to use this view (quick guide)">
-          <MiniMarkdown text={HELP.howToUse} />
-        </InfoNote>
-
-        <InfoNote title="Didactic disclaimer">
-          <MiniMarkdown text={HELP.disclaimer} />
-        </InfoNote>
+        <InfoNote title="How to use this view (quick guide)"><MiniMarkdown text={HELP.howToUse} /></InfoNote>
+        <InfoNote title="Didactic disclaimer"><MiniMarkdown text={HELP.disclaimer} /></InfoNote>
       </div>
 
       {/* Drawer toggle */}
@@ -1070,7 +1252,7 @@ We use the **Holsapple–Schmidt scaling law** to estimate the diameter of the c
         style={{
           position: "absolute",
           top: 12,
-          left: drawerOpen ? 332 : 12,
+          left: drawerOpen ? 352 : 12,
           transition: "left .25s ease",
           padding: "8px 10px",
           borderRadius: 10,
