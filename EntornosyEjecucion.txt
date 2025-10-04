@@ -1,0 +1,16 @@
+--ACTIVACIÓN DEL ENTORNO (EN TERMINAL)
+cd back
+source env/bin/activate
+pip install -r requirements.txt
+(actualización de requirements.txt por si acaso): pip freeze > requirements.txt
+
+--EJECUCIÓN DE LA APP
+    --BACK (desde carpeta back): python app.py
+    --FRONT (desde carpeta front): python -m http.server
+
+--DESACTIVACIÓN DEL ENTORNO (EN TERMINAL)
+deactivate
+
+--CLONAR REPOSITORIO EN NUESTRO ORDENADOR
+(en la carpeta donde quieran guardar el proyecto)
+git clone https://github.com/carmenqr/MeteorMadness.git
