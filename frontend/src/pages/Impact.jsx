@@ -6,6 +6,9 @@ import "leaflet/dist/leaflet.css";
 // traer los parámetros del formulario
 import { calcularImpacto } from "../simulation/impact-utils.js";
 
+// === FIXED seismic efficiency (read-only) ===
+const ETA_SEISMIC = 0.10; // 10%
+
 // --- MMI palette / descriptions adapted for impact shaking ---
 const mmiBreaks = [
   { max: 1.9, label: "I", color: "#edf8fb", desc: "Not felt / instrumental detection only." },
@@ -148,74 +151,109 @@ function InfoNote({ title = "What is this?", children, defaultOpen = false }) {
   );
 }
 
-// --- Educational help text (EN) ---
+// --- Educational help text (EN, no formulas) ---
 const HELP = {
   mmi: `
-**MMI (Modified Mercalli Intensity)** describes how shaking is **felt** at the surface, from I (not felt) to X+ (destructive). It is **not** earthquake magnitude—it's **local intensity**.
+**MMI (Modified Mercalli Intensity)** tells you how shaking is **felt** at the surface, from I (not felt) to X+ (destructive). It is **not** the earthquake magnitude — it is a **local experience** of shaking.
 
 How to read:
-• Pick an MMI level to highlight its contour (isointensity band).
-• Intensity typically decreases with distance from the source.
-• Local geology, topography, and depth can amplify or damp shaking.
+• Pick an MMI level to highlight its contour (areas that feel roughly the same intensity).
+• Intensity usually decreases as you move away from the source.
+• Local ground conditions (soft soils, hills, basins) can make shaking stronger or weaker.
 
-Didactic note: Here we use **USGS-style MMI contours** as a *proxy* for an asteroid impact to explain the concept. A real impact run would compute MMI from impactor energy deposition and wave propagation models.
+Teaching note: Here we use **USGS-style MMI contours** as a *proxy* for an asteroid impact to show the idea. A real impact run would compute shaking from the energy released by the impact and how waves travel through the ground.
 `.trim(),
 
   exposure: `
-**Population exposure** estimates how many people fall within each MMI band by overlaying intensity contours with demographic grids.
+**Population exposure** estimates how many people are inside each intensity band by overlaying the contours with population grids.
 
 How to read the table:
-• Each MMI row shows the estimated people under that intensity.
-• “Total” sums across all bands.
+• Each MMI row shows the estimated number of people under that intensity.
+• “Total” is the sum across all bands.
 
-Caveats: values depend on demographic sources and the spatial footprint of shaking. In this demo, exposure is proxied from USGS PAGER.
+Caveats: numbers depend on the population data used and the footprint of the shaking. In this demo, exposure is proxied from USGS PAGER products.
 `.trim(),
 
   cities: `
-**Affected cities** (if available) list highly populated places near the source:
-• **Population**: city size.
-• **MMI**: expected intensity felt there.
-• **Dist (km)**: distance to the source.
+**Affected cities** (if available) list large population centers near the source:
+• **Population**: how big the city is.
+• **MMI**: what intensity people there might feel.
+• **Dist (km)**: distance from the source.
 
-Use this to get a sense of which cities might feel stronger shaking.
+Use this list to see which cities could feel stronger shaking.
 `.trim(),
 
   losses: `
-**Human and economic risk** (PAGER) uses **empirical models** from historical events to estimate:
-• **Fatalities** (order-of-magnitude).
-• **Economic losses** (USD).
+**Human and economic risk** uses **empirical models** based on past events to estimate:
+• **Fatalities** (binned into ranges).
+• **Economic losses** (USD, also binned).
 
-The alert histogram shows **model uncertainty** (probabilities for different ranges).
+The alert histogram shows **uncertainty** — different ranges have different probabilities.
 
-Interpretation:
-• Large numbers are not point predictions, but **likely bands**.
-• Building vulnerability, infrastructure, and time of day affect real outcomes.
+Interpretation tips:
+• These are **ranges**, not precise predictions.
+• Outcomes depend on building quality, infrastructure, and time of day, among other factors.
 
-In this demo, PAGER is used for teaching. A full asteroid-impact pipeline would model shockwave, overpressure, structural response, etc.
+In this demo we show PAGER-style outputs for teaching. A full asteroid-impact system would also model shockwaves, overpressure, structural response, and more.
 `.trim(),
 
   tsunami: `
-This section shows a **tsunami bulletin** (static here due to CORS). Typical levels: **Warning**, **Watch**, **Advisory**, **Information**, or **No Tsunami Threat**.
+This section shows a **tsunami bulletin** (static here due to CORS). Typical levels include **Warning**, **Watch**, **Advisory**, **Information**, or **No Tsunami Threat**.
 
 How to read:
-• Header: issuing center and bulletin number.
-• **Evaluation**: whether there is a threat in listed regions.
-• **Event parameters**: magnitude, time, coordinates, depth, location.
-• **Updates**: whether more messages will follow.
+• **Header**: who issued the message and its number.
+• **Evaluation**: whether there is a threat for listed regions.
+• **Event details**: size, time, coordinates, depth, and location.
+• **Updates**: whether to expect more messages.
 
-Didactic note: No live fetch here; the text teaches the **format and reading**. For real-time data in production, use a backend proxy to call tsunami.gov.
+Teaching note: We use a static example to explain the format. For real-time data in production, call tsunami.gov from your backend.
 `.trim(),
 
   disclaimer: `
-**Didactic note**: This prototype uses a real USGS event as a *proxy* for an asteroid impact. Views and numbers (MMI, exposure, losses) are meant to **explain** the analysis flow. A full system would derive them from **impactor parameters** (size, speed, angle, density) plus **local layers** (population, vulnerability, topography, coastal proximity).
+**Teaching note**: We use a real USGS event as a *stand-in* for an asteroid impact. Numbers and views (MMI, exposure, losses) illustrate the workflow. A full system would drive them from **impactor inputs** (size, speed, angle, density) and **local layers** (population, building vulnerability, terrain, coastlines).
 `.trim(),
 
   howToUse: `
 Quick guide:
-1) Select an **MMI band** to understand “what it would feel like”.
+1) Pick an **MMI band** to understand “what it would feel like”.
 2) Check **exposure** to see how many people fall in each range.
-3) Review **losses** to understand orders of magnitude and **uncertainty**.
-4) Look at the **tsunami bulletin** format when the source is coastal/oceanic.
+3) Review **losses** to understand orders of magnitude and uncertainty.
+4) Open the **tsunami bulletin** format when the source is coastal or in the ocean.
+`.trim(),
+
+  craterExplain: `
+We estimate crater size from the **impactor's mass, density, and speed**, plus impact angle, the ground material, and gravity.
+
+What matters most:
+• **Bigger and faster impactors** excavate larger craters.
+• **Denser impactors** (for the same mass) are usually **smaller in size** but more penetrating.
+• **Shallow angles** spread energy over a wider area; **steeper angles** tend to dig deeper.
+• **Target rock**: stronger, denser ground resists excavation; softer ground enlarges the crater.
+
+We show: the **impactor diameter** (derived from mass and density), an estimate of the **transient crater**, and a **final crater** slightly larger after collapse.
+`.trim(),
+
+  fireExplain: `
+Thermal radiation from an impact can ignite materials and cause burns near the source. The **fire ring** is a teaching circle that marks where thermal effects could become harmful.
+
+What affects the ring:
+• **Total energy**: more energy means a larger affected radius.
+• **Fraction going into heat**: only part of the energy becomes thermal radiation.
+• **Threshold for harm**: higher thresholds (e.g., needing more heat to ignite) produce smaller rings.
+• **Air and visibility**: clouds, aerosols, or terrain can reduce how far heat travels.
+
+Treat this as an educational approximation to visualize potential thermal reach.
+`.trim(),
+
+  shockExplain: `
+A powerful impact sends out a **shock wave** in the air. The **shock ring** shows where the wave could be strong enough to damage windows, light structures, or cause injuries.
+
+What controls the ring:
+• **Energy release**: more energy pushes the damage zone outward.
+• **Chosen threshold**: stricter thresholds for damage create smaller circles.
+• **Atmospheric conditions**: wind, temperature, and terrain channel or weaken the wave.
+
+The values here are simplified so you can explore how changing the impact strength shifts the possible damage radius.
 `.trim()
 };
 
@@ -354,14 +392,12 @@ function calcFireRingRadius({ energiaJ, fRad = 0.03, Qt_kJ_m2 = 8, attenuation =
 /** ============================
  *  ONDA DE CHOQUE (sobrepresión)
  *  ============================*/
-// P_psi(Z) ≈ 8080/Z^3 + 114/Z^2 + 1/Z  → P_kPa = P_psi * 6.89476
 const PSI_TO_KPA = 6.89476;
 function peakOverpressure_kPa_from_Z(Z) {
   if (Z <= 0) return Infinity;
   const Ppsi = 8080 / (Z ** 3) + 114 / (Z ** 2) + 1 / Z;
   return Ppsi * PSI_TO_KPA;
 }
-// Invertir para hallar Z dado P_kPa (búsqueda binaria)
 function invertZforPressure_kPa(target_kPa) {
   if (!Number.isFinite(target_kPa) || target_kPa <= 0) return null;
   let lo = 0.02, hi = 50; // rango típico
@@ -372,17 +408,29 @@ function invertZforPressure_kPa(target_kPa) {
   }
   return 0.5 * (lo + hi);
 }
-// Radio del anillo para umbral de sobrepresión
-// 1 kg TNT = 4.184 MJ  → W_kg = E / 4.184e6
 function calcShockRingRadius({ energiaJ, Pth_kPa = 30 }) {
   if (!energiaJ || energiaJ <= 0) return null;
-  const Wkg = energiaJ / 4.184e6;
+  const Wkg = energiaJ / 4.184e6;           // kg TNT equivalentes
   if (!Number.isFinite(Wkg) || Wkg <= 0) return null;
   const Z = invertZforPressure_kPa(Pth_kPa);
   if (!Z) return null;
-  const R = Z * Math.cbrt(Wkg); // metros
-  const yield_kt = energiaJ / 4.184e12; // kilotones TNT
+  const R = Z * Math.cbrt(Wkg);             // metros
+  const yield_kt = energiaJ / 4.184e12;     // kilotones TNT
   return { Rshock_m: R, Pth_kPa, yield_kt };
+}
+
+/** ============================
+ *  MAGNITUD SÍSMICA (Mw) desde energía
+ *  ============================*/
+function mwFromEnergyJoules(Ej) {
+  if (!Number.isFinite(Ej) || Ej <= 0) return null;
+  return (2 / 3) * (Math.log10(Ej) - 4.8);
+}
+function mwFromImpactEnergy(energiaJ, etaSeismic = ETA_SEISMIC) {
+  if (!Number.isFinite(energiaJ) || energiaJ <= 0) return null;
+  if (!Number.isFinite(etaSeismic) || etaSeismic <= 0) return null;
+  const Es = energiaJ * etaSeismic;  // energía sísmica (J)
+  return mwFromEnergyJoules(Es);
 }
 
 export default function ImpactMMI() {
@@ -396,6 +444,8 @@ export default function ImpactMMI() {
 
   // Crater
   const craterLayerRef = useRef(null);
+  theImpactLatLonRefInit();
+  function theImpactLatLonRefInit() { }
   const impactLatLonRef = useRef(null);
   const [craterVisible, setCraterVisible] = useState(true);
 
@@ -412,6 +462,9 @@ export default function ImpactMMI() {
   // Inputs + crater dims
   const [impactInputs, setImpactInputs] = useState(null);
   const [craterDims, setCraterDims] = useState(null);
+
+  // Mw equivalente (ya no editable η)
+  const [mwEquivalent, setMwEquivalent] = useState(null);
 
   const navigate = useNavigate();
 
@@ -468,7 +521,7 @@ export default function ImpactMMI() {
     return () => clearTimeout(t);
   }, [drawerOpen]);
 
-  // 3) Leer parámetros del formulario al entrar
+  // 3) Leer parámetros del formulario al entrar y calcular todo
   useEffect(() => {
     const res = calcularImpacto();
     setImpactInputs(res || null);
@@ -489,10 +542,14 @@ export default function ImpactMMI() {
 
       const shock = calcShockRingRadius({ energiaJ: res.energiaJ, Pth_kPa: 30 });
       setShockParams(shock);
+
+      // Mw equivalente con η fija
+      setMwEquivalent(mwFromImpactEnergy(res.energiaJ, ETA_SEISMIC));
     } else {
       setCraterDims(null);
       setFireParams(null);
       setShockParams(null);
+      setMwEquivalent(null);
     }
   }, [eventId]);
 
@@ -526,7 +583,7 @@ export default function ImpactMMI() {
     });
     ring.bindTooltip(
       `Thermal ring ≈ ${(fireParams.Rfire_m / 1000).toFixed(2)} km<br>` +
-      `Dose ≥ ${fireParams.Qt_kJ_m2} kJ/m² · f_rad=${fireParams.fRad}`,
+      `Teaching value based on impact energy and assumed heat fraction`,
       { direction: "top", permanent: false, opacity: 0.95 }
     );
     ring.addTo(group);
@@ -549,8 +606,7 @@ export default function ImpactMMI() {
     });
     ring.bindTooltip(
       `Shock ring ≈ ${(shockParams.Rshock_m / 1000).toFixed(2)} km<br>` +
-      `Overpressure ≥ ${shockParams.Pth_kPa} kPa (≈ ${(shockParams.Pth_kPa / 6.89476).toFixed(2)} psi)` +
-      `<br>Yield ≈ ${shockParams.yield_kt.toFixed(2)} kt TNT`,
+      `Teaching value for an overpressure threshold`,
       { direction: "top", permanent: false, opacity: 0.95 }
     );
     ring.addTo(group);
@@ -586,26 +642,21 @@ export default function ImpactMMI() {
 
         const [lon, lat, depth] = detail.geometry.coordinates;
         const whenISO = new Date(detail.properties.time).toISOString();
-        const mag = detail.properties.mag;
         const place = detail.properties.place || "—";
 
-        setImpactInfo({ magnitude: mag, place, whenISO });
+        setImpactInfo({ place, whenISO });
         impactLatLonRef.current = { lat, lon };
 
+        // Punto de impacto (popup muestra Mw equivalente, texto educativo)
         L.circleMarker([lat, lon], {
           radius: 6, weight: 2, color: "#111", fillColor: "#ffcc00", fillOpacity: 0.9
         })
           .bindPopup(
-            `<strong>Impact point (demo)</strong><br>
-             Proxy magnitude: M ${mag}<br>
+            `<strong>Impact point </strong><br>
+             Equivalent earthquake magnitude: ${mwEquivalent != null ? mwEquivalent.toFixed(2) : "—"} (for teaching)<br>
+             Seismic efficiency set to ${(ETA_SEISMIC * 100).toFixed(0)}%<br>
              ${place}<br>
-             ${whenISO.replace("T", " ").slice(0, 19)} UTC<br>
-             Proxy depth: ${depth} km<br>
-             <div style="margin-top:6px">
-               <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Barringer_Crater_-_Arizona.jpg" 
-                    alt="Crater example" 
-                    style="width:260px;height:auto;border-radius:6px;border:1px solid #e5e7eb"/>
-             </div>`
+             ${whenISO.replace("T", " ").slice(0, 19)} UTC<br>`
           )
           .addTo(group);
 
@@ -720,7 +771,7 @@ export default function ImpactMMI() {
     })();
 
     return () => { abort = true; };
-  }, [eventId, selectedLabel, craterVisible, craterDims, fireVisible, fireParams, shockVisible, shockParams]);
+  }, [eventId, selectedLabel, craterVisible, craterDims, fireVisible, fireParams, shockVisible, shockParams, mwEquivalent]);
 
   // Restyle MMI (no refetch)
   useEffect(() => {
@@ -785,8 +836,9 @@ export default function ImpactMMI() {
       setShockParams(
         calcShockRingRadius({ energiaJ: res.energiaJ, Pth_kPa: 30 })
       );
+      setMwEquivalent(mwFromImpactEnergy(res.energiaJ, ETA_SEISMIC));
     } else {
-      setCraterDims(null); setFireParams(null); setShockParams(null);
+      setCraterDims(null); setFireParams(null); setShockParams(null); setMwEquivalent(null);
     }
   };
 
@@ -809,20 +861,25 @@ export default function ImpactMMI() {
         boxShadow: "0 6px 16px rgba(0,0,0,.12)",
         font: "14px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
         zIndex: 1000,
-        maxWidth: 360
+        maxWidth: 380
       }}>
         <strong>Asteroid Impact — Ground Shaking (MMI)</strong><br />
         <span style={{ opacity: .75, fontSize: 12 }}>
           Demo uses USGS-style MMI contours as a proxy for impact-induced shaking.
         </span>
         <div style={{ marginTop: 6 }}>
-          <div><strong>Event ID</strong>: <code>{eventId}</code></div>
-          {impactInfo && (
-            <div style={{ marginTop: 6 }}>
-              <div><strong>Proxy magnitude</strong> M {impactInfo.magnitude} — {impactInfo.place}</div>
-              <div style={{ opacity: .7 }}>{impactInfo.whenISO.replace("T", " ").slice(0, 19)} UTC</div>
+
+          <div style={{ marginTop: 6 }}>
+            <div><strong>Equivalent earthquake magnitude</strong> {mwEquivalent != null ? mwEquivalent.toFixed(2) : "—"}</div>
+            <div style={{ opacity: .7, fontSize: 12 }}>
+              Based on the impact energy and a fixed seismic efficiency (η) of {(ETA_SEISMIC * 100).toFixed(0)}%.
             </div>
-          )}
+            {impactInfo && (
+              <div style={{ opacity: .7, marginTop: 4 }}>
+                {impactInfo.place} — {impactInfo.whenISO.replace("T", " ").slice(0, 19)} UTC
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -870,6 +927,30 @@ export default function ImpactMMI() {
                   <div><strong>Estimated impactor diameter</strong>: {craterDims.Dimp.toFixed(1)} m</div>
                 </div>
               )}
+
+              {/* η fija y Mw equivalente (read-only) */}
+              <div style={{ marginTop: 10, borderTop: "1px solid #e5e7eb", paddingTop: 10 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, alignItems: "end" }}>
+                  <div>
+                    <strong>Seismic efficiency (η)</strong><br />
+                    <div style={{ padding: 6, borderRadius: 8, border: "1px solid #e5e7eb", background: "#f8fafc" }}>
+                      {(ETA_SEISMIC * 100).toFixed(0)}%
+                    </div>
+                    <div style={{ fontSize: 12, opacity: .65, marginTop: 4 }}>
+                      Fixed value for teaching purposes.
+                    </div>
+                  </div>
+                  <div>
+                    <strong>Equivalent Mw</strong><br />
+                    <div style={{ padding: 6, borderRadius: 8, border: "1px solid #e5e7eb", background: "#f8fafc" }}>
+                      {mwEquivalent != null ? mwEquivalent.toFixed(2) : "—"}
+                    </div>
+                    <div style={{ fontSize: 12, opacity: .65, marginTop: 4 }}>
+                      Educational conversion from impact energy to quake-like size.
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               <div style={{ marginTop: 8 }}>
                 <button onClick={refreshFromForm}
@@ -1055,15 +1136,7 @@ export default function ImpactMMI() {
         <div style={{ marginTop: 18 }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>4) Crater size estimation</div>
           <InfoNote title="How is crater size estimated?">
-            <MiniMarkdown text={`
-We use the **Holsapple–Schmidt scaling law** using impactor **mass, density, speed**, impact angle, target density and gravity.
-
-- We derive **impactor diameter** from mass & density:  m = ρ·(π/6)·D³  ⇒  D = (6m / (πρ))^(1/3)
-- The formula gives a **transient crater** (D_tr).  
-- Final crater ≈ **1.25 × D_tr**.
-
-In this view, we read mass/speed/density from the **form**, and use angle=45°, ρ_target=2500 kg/m³, g=9.81 m/s².
-            `} />
+            <MiniMarkdown text={HELP.craterExplain} />
           </InfoNote>
 
           <div style={{ marginTop: 8, border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
@@ -1105,17 +1178,8 @@ In this view, we read mass/speed/density from the **form**, and use angle=45°, 
         {/* (4.5) Fuego */}
         <div style={{ marginTop: 18 }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>5) Fire ring (thermal dose)</div>
-          <InfoNote title="How is the fire ring computed?">
-            <MiniMarkdown text={`
-We assume thermal radiation decays as **1/R²**.
-Radius where **dose** exceeds threshold \\(Q_t\\):
-
-\\( R = \\sqrt{\\dfrac{f_{rad}\\,E_k}{4\\pi\\,Q_t}} \\)
-
-- **E_k**: impact energy (from the form)
-- **f_rad**: fraction to thermal (demo: 0.03)
-- **Q_t**: ignition/burn threshold (typ. **5–10 kJ/m²**)
-            `} />
+          <InfoNote title="How is the fire ring estimated?">
+            <MiniMarkdown text={HELP.fireExplain} />
           </InfoNote>
 
           <div style={{ marginTop: 8, border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
@@ -1127,7 +1191,7 @@ Radius where **dose** exceeds threshold \\(Q_t\\):
               <>
                 <div><strong>Radius:</strong> {(fireParams.Rfire_m / 1000).toFixed(2)} km</div>
                 <div style={{ fontSize: 12, opacity: .7, marginTop: 4 }}>
-                  (Qt = {fireParams.Qt_kJ_m2} kJ/m² · f_rad = {fireParams.fRad})
+                  (educational threshold and heat fraction applied)
                 </div>
 
                 <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
@@ -1156,16 +1220,8 @@ Radius where **dose** exceeds threshold \\(Q_t\\):
         <div style={{ marginTop: 18 }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>6) Shock wave (overpressure)</div>
 
-          <InfoNote title="How is overpressure radius computed?">
-            <MiniMarkdown text={`
-We use **scaled distance** \\(Z = R/W^{1/3}\\) with TNT equivalence.
-Peak overpressure (empirical) in **psi**:
-
-\\( P(Z) \\approx 8080/Z^3 + 114/Z^2 + 1/Z \\) → \\(P_{kPa} = 6.89476\\,P_{psi}\\).
-
-Given threshold \\(P_{th}\\), we numerically invert to find \\(Z\\) and then \\(R = Z W^{1/3}\\).
-Default \\(P_{th}=30\\,\\text{kPa}\\) (≈ 4.35 psi) ~ moderate structural damage.
-            `} />
+          <InfoNote title="How is the shock ring estimated?">
+            <MiniMarkdown text={HELP.shockExplain} />
           </InfoNote>
 
           <div style={{ marginTop: 8, border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
