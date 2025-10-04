@@ -23,6 +23,7 @@ Follow these steps to set up the project locally.
 ### 1️⃣ Clone the repository
 
 git clone https://github.com/carmenqr/MeteorMadness.git
+
 cd MeteorMadness
 
 ### 2️⃣ Set up the Backend (Flask + Python)
