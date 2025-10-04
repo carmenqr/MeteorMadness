@@ -31,3 +31,31 @@ export function propagate(obj, tJulian) {
 
   return {pos: new THREE.Vector3(x, y, z), M};
 }
+
+export function getOrbitPoints(obj, steps = 512) {
+  const pts = [];
+  for (let k = 0; k <= steps; k++) {
+    const frac = k / steps;
+    const M = 2 * Math.PI * frac;
+    let E = solveKepler(M, obj.e);
+    const v = 2 * Math.atan2(
+      Math.sqrt(1 + obj.e) * Math.sin(E / 2),
+      Math.sqrt(1 - obj.e) * Math.cos(E / 2)
+    );
+    const r = obj.a * (1 - obj.e * Math.cos(E));
+
+    const x_orb = r * Math.cos(v);
+    const y_orb = r * Math.sin(v);
+
+    const cosO = Math.cos(obj.om * DEG2RAD), sinO = Math.sin(obj.om * DEG2RAD);
+    const cosi = Math.cos(obj.i * DEG2RAD), sini = Math.sin(obj.i * DEG2RAD);
+    const cosw = Math.cos(obj.w * DEG2RAD), sinw = Math.sin(obj.w * DEG2RAD);
+
+    const x = (cosO*cosw - sinO*sinw*cosi)*x_orb + (-cosO*sinw - sinO*cosw*cosi)*y_orb;
+    const y = (sinO*cosw + cosO*sinw*cosi)*x_orb + (-sinO*sinw + cosO*cosw*cosi)*y_orb;
+    const z = (sini*sinw)*x_orb + (sini*cosw)*y_orb;
+
+    pts.push(new THREE.Vector3(x, y, z));
+  }
+  return pts;
+}

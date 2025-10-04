@@ -1,12 +1,10 @@
 import * as THREE from 'three';
 import { DEG2RAD } from '../lib/asteroid_utils.js';
-import { propagate } from '../lib/orbit_utils.js';
+import { propagate, getOrbitPoints } from '../lib/orbit_utils.js';
 import { createScene } from './scene.js';
 import { initInfoPanel, showPanelFor, hidePanel, onPanelReset } from './home-panel.js';
 import earthUrl from '../assets/earth.jpg'
 import asteroidUrl from '../assets/asteroid.jpg'
-
-
 
 let asteroides = [];
 let simulationPaused = false;     // pausa/continúa la propagación
@@ -24,6 +22,14 @@ let tabHidden = false;
 
 let defaultView = { pos: null, target: null }; // vista “global” inicial
 let savedView = null;                           // vista temporal cuando abrimos el panel
+
+const TIME_SCALE = 1; // días/segundo de simulación
+
+let _running = false;
+let _frameId = null;
+let _sceneRefs = null;         // guardamos {scene,camera,renderer,controls}
+let _visibilityHandler = null;
+let _resizeHandler = null;
 
 function freezeSystem() {
   simulationPaused = true;
@@ -113,28 +119,6 @@ function restoreEarthScale(earthMesh){
   }
 }
 
-// Aíslalo pero mantén visibles unos items concretos (ej. Impactor + Tierra)
-function isolateKeep(keepItems, list) {
-  const keepSet = new Set(keepItems.filter(Boolean));
-  isolatedItem = keepItems[0] || null; // por si quieres saber quién es el principal
-  for (const it of list) {
-    const vis = keepSet.has(it);
-    it.mesh.visible = vis;
-    if (it.pathLine) {
-      it.pathLine.visible = vis;
-      if (it.pathLine.material) it.pathLine.material.opacity = vis ? 1.0 : 0.25;
-    }
-    it.labelEl.style.display = vis ? 'block' : 'none';
-    // al ocultar, marcar para cortar tramo al volver
-    it.wasRenderable = vis;
-    if (vis) {
-      it.pathPoints = [ it.mesh.position.clone() ];
-      it.pathGeom.setFromPoints(it.pathPoints);
-      it.pathGeom.computeBoundingSphere();
-    }
-  }
-}
-
 
 function restoreDefaultView({ smooth = false, duration = 700 } = {}) {
   const cam = window.__camera;
@@ -178,8 +162,6 @@ function isRenderable(item, camera) {
   // dentro del clip-space y delante de la cámara (márgenes holgados)
   return sp.z < 1 && sp.x > -1.2 && sp.x < 1.2 && sp.y > -1.2 && sp.y < 1.2;
 }
-
-
 
 // ———————————————————————————————————————
 // Cargar datos del backend
@@ -227,7 +209,6 @@ async function cargarAsteroides() {
       console.warn("Error cargando /api/earth:", e);
     }
 
-    iniciarSimulacion();
   } catch (error) {
     console.warn("No se pudo cargar asteroides desde backend, intentando mock local. Error:", error);
     try {
@@ -235,7 +216,7 @@ async function cargarAsteroides() {
       if (!local.ok) throw new Error(`Local mock responded ${local.status}`);
       asteroides = await local.json();
       console.log(`Loaded ${asteroides.length} asteroids from local mock`);
-      iniciarSimulacion();
+
     } catch (err2) {
       console.error('Fallo al cargar mock local:', err2);
       // Mostrar mensaje visible al usuario
@@ -251,7 +232,7 @@ async function cargarAsteroides() {
 }
 
 // ———————————————————————————————————————
-// UI auxiliar (se crea desde JS, no toques HTML)
+// UI auxiliar
 // ———————————————————————————————————————
 function ensureUI() {
   // Contenedor de labels
@@ -292,44 +273,54 @@ function ensureUI() {
 function isolate(item, list) {
   isolatedItem = item;
   for (const it of list) {
-    const vis = (it === item);
-    it.mesh.visible = vis;
-    // Ocultamos las órbitas no seleccionadas y resaltamos la del seleccionado
-    if (it.pathLine) it.pathLine.visible = vis;
-    if (vis && it.pathLine && it.pathLine.material) it.pathLine.material.opacity = 1.0;
-    it.labelEl.style.display = vis ? 'block' : 'none';
+    const sel = it === item;
 
-    if (!vis) {
-      it.wasRenderable = false; // se oculta → al volver, tramo nuevo
-    } else {
-      // el seleccionado se queda: trazo desde su pos actual (opcional)
-      it.pathPoints = [ it.mesh.position.clone() ];
-      it.pathGeom.setFromPoints(it.pathPoints);
-      it.pathGeom.computeBoundingSphere();
-      it.wasRenderable = true;
+    if (it.mesh) it.mesh.visible = sel;
+    if (it.pathLine) {
+      it.pathLine.visible = sel;
+      if (it.pathLine.material) {
+        it.pathLine.material.transparent = true;
+        it.pathLine.material.opacity = sel ? 1.0 : 0.25;
+      }
     }
-
+    if (it.labelEl) it.labelEl.style.display = sel ? 'block' : 'none';
   }
-  showPanelFor(item); //PARA EL PANEL LATERAL DE INFO
+  showPanelFor(item);
+}
+
+function isolateKeep(keepItems, list) {
+  const keepSet = new Set(keepItems.filter(Boolean));
+  isolatedItem = keepItems[0] || null;
+  for (const it of list) {
+    const keep = keepSet.has(it);
+
+    if (it.mesh) it.mesh.visible = keep;
+    if (it.pathLine) {
+      it.pathLine.visible = keep;
+      if (it.pathLine.material) {
+        it.pathLine.material.transparent = true;
+        it.pathLine.material.opacity = keep ? (keepItems.length === 1 ? 1.0 : 0.9) : 0.25;
+      }
+    }
+    // Mostrar labels solo de los kept
+    if (it.labelEl) it.labelEl.style.display = keep ? 'block' : 'none';
+  }
 }
 
 function resetIsolation(listRef) {
   const list = listRef || window.__asteroidMeshes || [];
   isolatedItem = null;
   for (const it of list) {
-    it.mesh.visible = true;
-    // Restaurar visibilidad y opacidad por defecto de las órbitas
+    if (it.mesh) it.mesh.visible = true;
     if (it.pathLine) {
       it.pathLine.visible = true;
-      if (it.pathLine.material) it.pathLine.material.opacity = 0.25;
+      if (it.pathLine.material) {
+        it.pathLine.material.transparent = true;
+        it.pathLine.material.opacity = 0.25;
+      }
     }
-    it.labelEl.style.display = 'block';
-
-    it.pathPoints = [ it.mesh.position.clone() ];
-    it.pathGeom.setFromPoints(it.pathPoints);
-    it.pathGeom.computeBoundingSphere();
-    it.wasRenderable = true;
-
+    // Mostrar de nuevo TODOS los labels tras reset
+    if (it.labelEl) it.labelEl.style.display = 'block';
   }
   hidePanel();
 }
@@ -354,145 +345,92 @@ window.addEventListener('sim:resume-orbits', () => {
 // ———————————————————————————————————————
 // Simulación
 // ———————————————————————————————————————
-function iniciarSimulacion() {
+function iniciarSimulacion(mountEl) {
   ensureUI();
   initInfoPanel();
 
-  const { scene, camera, renderer, controls } = createScene();
+  const { scene, camera, renderer, controls } = createScene(mountEl);
+  _sceneRefs = { scene, camera, renderer, controls };
 
-  // Guarda la vista global inicial (tu 0,0,0)
   defaultView.pos = camera.position.clone();
-  defaultView.target = (controls ? controls.target.clone() : new THREE.Vector3(0,0,0));
+  defaultView.target = controls ? controls.target.clone() : new THREE.Vector3();
 
-  // Exponer para funciones externas (restauración)
   window.__camera = camera;
   window.__controls = controls;
-
-  // Evitar clipping al hacer zoom muy cerca
   camera.near = 0.001;
-  camera.far  = 5000;
+  camera.far = 5000;
   camera.updateProjectionMatrix();
 
   const labelLayer = document.getElementById('labels');
-  const asteroidMeshes = [];              // mantenemos tu nombre
-  window.__asteroidMeshes = asteroidMeshes; // acceso para resetIsolation externo
+  const asteroidMeshes = [];
+  window.__asteroidMeshes = asteroidMeshes;
 
-    const texLoader = new THREE.TextureLoader()
-    const maxAniso = renderer.capabilities.getMaxAnisotropy?.() ?? 1
+  const texLoader = new THREE.TextureLoader();
+  const maxAniso = renderer.capabilities.getMaxAnisotropy?.() ?? 1;
+  const earthTex = texLoader.load(earthUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); });
+  const asteroidTex = texLoader.load(asteroidUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); });
 
-    const earthTex = texLoader.load(earthUrl, t => {
-        t.colorSpace = THREE.SRGBColorSpace
-        t.anisotropy = Math.min(8, maxAniso)
-    })
-
-    const asteroidTex = texLoader.load(asteroidUrl, t => {
-        t.colorSpace = THREE.SRGBColorSpace
-        t.anisotropy = Math.min(8, maxAniso)
-    })
-
-  // Si tenemos datos de la Tierra, crear su mesh + órbita + label
+  // Earth
   if (earthData) {
     try {
-      const geomE = new THREE.SphereGeometry(0.09, 64, 64)
-      const matE = new THREE.MeshStandardMaterial({
-        map: earthTex,
-        flatShading: true,
-        shininess: 5,
-        specular: new THREE.Color(0x111111),
-        emissive: new THREE.Color(0x1a1f2a),
-        emissiveIntensity: 0.3
-      })
-      const meshE = new THREE.Mesh(geomE, matE)
-      meshE.name = earthData.name || 'Earth'
-      meshE.castShadow = false       // no proyecta sombra
-      meshE.receiveShadow = false    // no recibe sombra
-
+      const geomE = new THREE.SphereGeometry(0.09, 64, 64);
+      const matE = new THREE.MeshBasicMaterial({ map: earthTex });
+      const meshE = new THREE.Mesh(geomE, matE);
       meshE.name = earthData.name || 'Earth';
 
-      const pathGeomE = new THREE.BufferGeometry().setFromPoints([]);
-      const pathMatE = new THREE.LineBasicMaterial({ color: 0x2b6fff, transparent: true, opacity: 0.25 });
+      const earthPts = getOrbitPoints(earthData, 512);
+      const pathGeomE = new THREE.BufferGeometry().setFromPoints(earthPts);
+      const pathMatE = new THREE.LineBasicMaterial({ color: 0x2b6fff, transparent: true, opacity: 0.25, depthWrite:false });
       const pathLineE = new THREE.Line(pathGeomE, pathMatE);
       pathLineE.frustumCulled = false;
-      pathGeomE.computeBoundingSphere();
-      scene.add(pathLineE);
-      scene.add(meshE);
+      scene.add(pathLineE, meshE);
 
       const labelE = document.createElement('div');
       labelE.className = 'asteroid-label';
       labelE.textContent = meshE.name;
+      labelE.style.display = 'block';
       Object.assign(labelE.style, {
-        position: 'absolute', transform: 'translate(-50%,-100%)', padding: '2px 6px',
-        background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: '8px',
-        font: '12px system-ui', whiteSpace: 'nowrap', pointerEvents: 'none'
+        position:'absolute', transform:'translate(-50%,-100%)', padding:'2px 6px',
+        background:'rgba(0,0,0,0.6)', color:'#fff', borderRadius:'8px',
+        font:'12px system-ui', whiteSpace:'nowrap', pointerEvents:'none'
       });
       labelLayer.appendChild(labelE);
 
-      earthItem = {
-        mesh: meshE,
-        obj: earthData,
-        pathLine: pathLineE,
-        pathGeom: pathGeomE,
-        pathPoints: [],
-        lastM: (earthData.M0 ?? 0) * DEG2RAD,
-        labelEl: labelE,
-        wasRenderable: true
-      };
-      asteroidMeshes.push(earthItem);
-    } catch (e) { console.warn('No se pudo crear mesh de Earth:', e); }
+      asteroidMeshes.push(earthItem = {
+        mesh: meshE, obj: earthData, pathLine: pathLineE, pathGeom: pathGeomE, labelEl: labelE
+      });
+    } catch(e){ console.warn('Earth fail', e); }
   }
 
-  // Crear asteroides + trayectorias + labels
-  for (let obj of asteroides) {
-    const geom = new THREE.SphereGeometry(0.03, 32, 32)
+  // Asteroides
+  for (const obj of asteroides) {
+    const geom = new THREE.SphereGeometry(0.03, 32, 32);
     const mat = new THREE.MeshPhongMaterial({
-        map: asteroidTex,
-        flatShading: true,
-        color: 0xffffff,
-        emissive: 0x202020,
-        emissiveIntensity: 0.35,
-        shininess: 4,
-        specular: 0x050505
-    })
-    const mesh = new THREE.Mesh(geom, mat)
-    mesh.name = obj.name || 'Asteroide'
-    mesh.castShadow = false
-    mesh.receiveShadow = false
-
+      map: asteroidTex, color: 0xffffff, emissive: 0x202020, emissiveIntensity: 0.35,
+      shininess: 4, specular: 0x050505
+    });
+    const mesh = new THREE.Mesh(geom, mat);
     mesh.name = obj.name || 'Asteroide';
 
-    const pathGeom = new THREE.BufferGeometry().setFromPoints([]);
-    // Órbitas atenuadas por defecto
-    const pathMat = new THREE.LineBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.25 });
+    const orbitPts = getOrbitPoints(obj, 512);
+    const pathGeom = new THREE.BufferGeometry().setFromPoints(orbitPts);
+    const pathMat  = new THREE.LineBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.25, depthWrite:false });
     const pathLine = new THREE.Line(pathGeom, pathMat);
     pathLine.frustumCulled = false;
-    pathGeom.computeBoundingSphere();
-    scene.add(pathLine);
-    scene.add(mesh);
+    scene.add(pathLine, mesh);
 
-    // Label DOM siempre visible
     const label = document.createElement('div');
     label.className = 'asteroid-label';
     label.textContent = mesh.name;
+    label.style.display = 'block';
     Object.assign(label.style, {
-      position: 'absolute',
-      transform: 'translate(-50%,-100%)',
-      padding: '2px 6px',
-      background: 'rgba(0,0,0,0.6)',
-      color: '#fff',
-      borderRadius: '8px',
-      font: '12px system-ui',
-      whiteSpace: 'nowrap',
-      pointerEvents: 'none'
+      position:'absolute', transform:'translate(-50%,-100%)', padding:'2px 6px',
+      background:'rgba(0,0,0,0.6)', color:'#fff', borderRadius:'8px',
+      font:'12px system-ui', whiteSpace:'nowrap', pointerEvents:'none'
     });
     labelLayer.appendChild(label);
 
-    asteroidMeshes.push({
-      mesh, obj,
-      pathLine, pathGeom, pathPoints: [],
-      lastM: (obj.M0 ?? 0) * DEG2RAD,
-      labelEl: label,
-      wasRenderable: true
-    });
+    asteroidMeshes.push({ mesh, obj, pathLine, pathGeom, labelEl: label });
   }
 
   // ——— IMPACTOR2025: localizar, destacar y preparar aislamiento + pausa al abrir panel ———
@@ -559,98 +497,98 @@ function iniciarSimulacion() {
     // Asteroide normal: aislar + info
     isolate(item, asteroidMeshes);
   });
-
-  // Animación
-  let t0 = Date.now();
+  
+// Reemplaza la función animate completa por:
+  let lastFrameMsLocal = performance.now();
   function animate() {
-    requestAnimationFrame(animate);
-
+    _frameId = requestAnimationFrame(animate);
     const now = performance.now();
-    const dtMs = now - lastFrameMs;
-    lastFrameMs = now;
+    const dt = now - lastFrameMsLocal;
+    lastFrameMsLocal = now;
 
-    // Avanza tiempo de sim SOLO si no está pausado y la pestaña está visible
     if (!simulationPaused && !tabHidden) {
-      // Mantén tu escala (antes /100). Ajusta si quieres más/menos veloz.
-      simDays += dtMs / 1000;
+      simDays += (dt/1000)*TIME_SCALE;
     }
     const tJulian = baseJulian + simDays;
 
-    for (let item of asteroidMeshes) {
-      const renderable = isRenderable(item, camera);
-
-      if (!simulationPaused && renderable) {
-        // Si vuelve a ser renderizable (venía oculto/tab oculta), empezamos un tramo nuevo
-        if (!item.wasRenderable || item.pathPoints.length === 0) {
-          const { pos, M } = propagate(item.obj, tJulian);
-          item.mesh.position.copy(pos);
-          item.lastM = M;
-          item.pathPoints = [ pos.clone() ];
-          item.pathGeom.setFromPoints(item.pathPoints);
-          item.pathGeom.computeBoundingSphere();
+    for (const item of asteroidMeshes) {
+      if (!simulationPaused && !tabHidden) {
+        const { pos } = propagate(item.obj, tJulian);
+        item.mesh.position.copy(pos);
+      }
+      if (item.labelEl && item.labelEl.style.display === 'block') {
+        const sp = item.mesh.position.clone().project(camera);
+        if (sp.z < 1) {
+          const x = (sp.x*0.5+0.5)*window.innerWidth;
+          const y = (-sp.y*0.5+0.5)*window.innerHeight;
+            item.labelEl.style.left = `${x}px`;
+            item.labelEl.style.top  = `${y}px`;
         } else {
-          // Propagación normal
-          const { pos, M } = propagate(item.obj, tJulian);
-          item.mesh.position.copy(pos);
-
-          if (M < item.lastM) item.pathPoints = [];
-          item.lastM = M;
-
-          // (opcional) límite de puntos para no crecer infinito:
-          // if (item.pathPoints.length > 2000) item.pathPoints.shift();
-
-          item.pathPoints.push(item.mesh.position.clone());
-          item.pathGeom.setFromPoints(item.pathPoints);
-          item.pathGeom.computeBoundingSphere();
+          item.labelEl.style.display = 'none';
         }
-      } else {
-        // Pausado o no renderizable → NO actualizamos órbita ni añadimos puntos
-        // Marcamos para que al volver a verse se corte el tramo
-        item.wasRenderable = false;
       }
-
-      // Labels
-      if (renderable) {
-        const screenPos = item.mesh.position.clone().project(camera);
-        const x = (screenPos.x * 0.5 + 0.5) * window.innerWidth;
-        const y = (-screenPos.y * 0.5 + 0.5) * window.innerHeight;
-        item.labelEl.style.display = 'block';
-        item.labelEl.style.left = `${x}px`;
-        item.labelEl.style.top  = `${y}px`;
-      } else {
-        item.labelEl.style.display = 'none';
-      }
-
-      item.wasRenderable = renderable;
     }
-
     controls.update();
     renderer.render(scene, camera);
   }
   animate();
 
-  // Resize
-  window.addEventListener('resize', () => {
+  // Listeners (guardar para cleanup)
+  _resizeHandler = () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
-  });
+  };
+  window.addEventListener('resize', _resizeHandler);
+
+  _visibilityHandler = () => {
+    tabHidden = document.hidden;
+    if (!tabHidden) lastFrameMs = performance.now();
+  };
+  document.addEventListener('visibilitychange', _visibilityHandler);
 }
 
-cargarAsteroides();
-
-document.addEventListener('visibilitychange', () => {
-  tabHidden = document.hidden;
-  if (!tabHidden) {
-    // resetea el reloj para evitar dt gigante
-    lastFrameMs = performance.now();
+export async function runHomeSimulation(mountEl) {
+  if (_running) return () => {};
+  _running = true;
+  try {
+    await cargarAsteroides();
+    iniciarSimulacion(mountEl);
+  } catch (e) {
+    console.error('No se pudo iniciar la simulación:', e);
+    _running = false;
+    return () => {};
   }
-  // fuerza que TODOS empiecen nuevo tramo al volver
-  const list = window.__asteroidMeshes || [];
-  for (const it of list) it.wasRenderable = false;
-});
 
+  return function cleanup() {
+    simulationPaused = true;
+    if (_frameId) cancelAnimationFrame(_frameId);
+    _frameId = null;
 
+    document.removeEventListener('visibilitychange', _visibilityHandler);
+    window.removeEventListener('resize', _resizeHandler);
+
+    const labels = document.getElementById('labels');
+    if (labels?.parentNode) labels.parentNode.removeChild(labels);
+
+    if (_sceneRefs) {
+      const { scene, renderer } = _sceneRefs;
+      scene.traverse(o => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) {
+          if (Array.isArray(o.material)) o.material.forEach(m => m.dispose());
+          else o.material.dispose();
+        }
+      });
+      renderer.dispose();
+      if (renderer.domElement && renderer.domElement.parentNode === mountEl) {
+        mountEl.removeChild(renderer.domElement);
+      }
+    }
+    _sceneRefs = null;
+    _running = false;
+  };
+}
 
 //Ejemplo de función de mandar datos de asteroides al back (por si guardamos cosas en BD)
 /*fetch("http://127.0.0.1:5000/api/send-asteroides", {

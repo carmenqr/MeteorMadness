@@ -73,9 +73,6 @@ export function createScene(mountNode = null) {
   // 1) una “luz de espacio” muy tenue (relleno global)
   const ambient = new THREE.AmbientLight(0xffffff, 0.78); // 0.08–0.18
   scene.add(ambient);
-
-  const hemi = new THREE.HemisphereLight(0xfff6c5, 0x1a2740, 0.55)
-  scene.add(hemi)
   
   const solarLight = new THREE.PointLight(0xfff7c0, /*intensity*/ 8, /*distance*/ 200, /*decay*/ 2);
   solarLight.castShadow = false;
