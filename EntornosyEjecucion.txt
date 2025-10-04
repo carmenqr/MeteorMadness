@@ -22,6 +22,7 @@ git clone https://github.com/carmenqr/MeteorMadness.git
 -API-asteroides NEOS (SOLO UNA VEZ)
 export NASA_API_KEY="BrayMFziYdhq2l5OaNMzEnpL46gaVEWEbVjDzOQe"
 export NASA_API_KEY="LmhbQUQz3S9FYN0aqjzeIyPfFKtUWc1gdKfRfnMH" //segunda api key
+export NASA_API_KEY="Vy1jD5le0nuavm7Rl8TBaNqMSggvqC8qHam5Klzk"
 
 --INSTALA ULTIMA VERSION NODE (usa la del .nvmrc)
 nvm use

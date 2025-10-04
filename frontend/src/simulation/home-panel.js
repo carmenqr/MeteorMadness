@@ -4,6 +4,21 @@
 let panelEl = null;
 let resetHandlers = new Set();
 
+// --- Impactor form state & mini API ---
+let impactorState = { massKg: null, speedKms: null, densityKgM3: null };
+const impactorListeners = new Set();
+
+export function getImpactorState() {
+  return { ...impactorState };
+}
+export function onImpactorChange(handler) {
+  impactorListeners.add(handler);
+  return () => impactorListeners.delete(handler);
+}
+function emitImpactorChange() {
+  for (const fn of impactorListeners) { try { fn({ ...impactorState }); } catch {} }
+}
+
 function ensurePanel() {
   if (panelEl) return panelEl;
 
@@ -63,14 +78,25 @@ function ensurePanel() {
     /* --- Form mode (Impactor2025) --- */
     #info-panel .form { display:flex; flex-direction:column; gap:12px; margin-top:8px; }
     #info-panel .field { display:flex; flex-direction:column; gap:6px; }
+    #info-panel .label-row { display:flex; align-items:center; gap:6px; }
     #info-panel .field label { font-weight:700; font-size:12px; color:#e2e8f0; }
-    #info-panel .field input {
+    #info-panel .field input, 
+    #info-panel .field select {
       background:#0b1220; color:#e5e7eb; border:1px solid #24365f; border-radius:10px;
       padding:8px 10px; font-size:13px; outline:none;
     }
     #info-panel .field small { color:#93c5fd; font-size:11px; }
     #info-panel .actions { display:flex; gap:8px; margin-top:6px; }
     #info-panel .btn.primary { background:#2563eb; }
+    #info-panel .danger { color:#fecaca; }
+
+    /* Tooltips inside form */
+    #info-panel .form-tip { 
+      background:#0c1326; border:1px solid #213055; border-radius:10px;
+      padding:8px 10px; color:#dbeafe; font-size:12px; display:none; margin-top:4px;
+    }
+    #info-panel .form-tip.show { display:block; }
+    #info-panel .qmark.inline { width:18px; height:18px; font-size:12px; }
   `;
   document.head.appendChild(style);
 
@@ -155,6 +181,15 @@ export function showPanelFor(item) {
 
   // —— SPECIAL CASE: Impactor2025 -> show form instead of info ——
   if (String(displayName).toLowerCase() === 'impactor2025') {
+    const MAX_MASS_KG = 1e12; // 1 billón de toneladas = 10^12 kg
+    const MIN_VEL_KMS = 11;   // 11 km/s
+    const MAX_VEL_KMS = 72;   // 72 km/s
+
+    // precrear ids únicos para tooltips
+    const tipMassId = `tip-mass-${Math.random().toString(36).slice(2,7)}`;
+    const tipVelId  = `tip-vel-${Math.random().toString(36).slice(2,7)}`;
+    const tipDenId  = `tip-den-${Math.random().toString(36).slice(2,7)}`;
+
     panelEl.innerHTML = `
       <div class="topbar">
         <div class="title">${h(displayName)}</div>
@@ -165,41 +200,145 @@ export function showPanelFor(item) {
 
       <div class="form">
         <div class="field">
-          <label for="inp-mass">Mass</label>
-          <input id="inp-mass" type="number" min="0" step="any" placeholder="e.g., 1.2e9">
-          <small>Units: kilograms (kg)</small>
+          <div class="label-row">
+            <label for="inp-mass">Mass</label>
+            <div class="qmark inline" data-tip="${tipMassId}" title="What is mass?">?</div>
+          </div>
+          <input id="inp-mass" type="number" min="0" max="${MAX_MASS_KG}" step="any" placeholder="e.g., 1.2e9" inputmode="decimal">
+          <small>Units: kilograms (kg). Max: 1e12 kg (one billion tonnes).</small>
+          <div id="${tipMassId}" class="form-tip">
+            <b>Why it matters:</b> Mass multiplies impact energy: <i>E = ½·m·v²</i>.
+            Higher mass → larger crater diameter, more ejecta, stronger seismic waves and higher tsunami potential (if water impact).
+          </div>
         </div>
+
         <div class="field">
-          <label for="inp-velocity">Velocity</label>
-          <input id="inp-velocity" type="number" min="0" step="any" placeholder="e.g., 20.5">
-          <small>Units: kilometers per second (km/s)</small>
+          <div class="label-row">
+            <label for="inp-velocity">Impact velocity</label>
+            <div class="qmark inline" data-tip="${tipVelId}" title="What is impact velocity?">?</div>
+          </div>
+          <input id="inp-velocity" type="number" min="${MIN_VEL_KMS}" max="${MAX_VEL_KMS}" step="any" placeholder="e.g., 20.5" inputmode="decimal">
+          <small>Units: kilometers per second (km/s). Allowed range: 11–72 km/s.</small>
+          <div id="${tipVelId}" class="form-tip">
+            <b>Why it matters:</b> Velocity enters squared in <i>E = ½·m·v²</i>.
+            Higher speed → disproportionately more energy, stronger shockwave and thermal radiation, more melt/vaporization, and a larger crater.
+          </div>
         </div>
+
         <div class="field">
-          <label for="inp-volume">Volume</label>
-          <input id="inp-volume" type="number" min="0" step="any" placeholder="e.g., 5.0e6">
-          <small>Units: cubic meters (m³)</small>
+          <div class="label-row">
+            <label for="sel-density">Material (density helper)</label>
+            <div class="qmark inline" data-tip="${tipDenId}" title="What is density?">?</div>
+          </div>
+          <select id="sel-density">
+            <option value="" disabled selected>pull down for options</option>
+            <option value="1000">1000 kg/m³ for ice</option>
+            <option value="1500">1500 kg/m³ for porous rock</option>
+            <option value="3000">3000 kg/m³ for dense rock</option>
+            <option value="8000">8000 kg/m³ for iron</option>
+          </select>
+          <small>We store only the numeric density (kg/m³), not the label.</small>
+          <div id="${tipDenId}" class="form-tip">
+            <b>Why it matters:</b> Density relates to strength and penetration.
+            Low-density bodies (ice/porous) tend to break higher in the atmosphere (airbursts).
+            High-density (iron) survive deeper, transfer momentum more efficiently, and usually create larger craters for the same mass.
+          </div>
         </div>
 
         <div class="actions">
           <button id="btn-impact" class="btn primary" type="button">Impact</button>
           <button id="btn-mitigate" class="btn" type="button">Mitigate</button>
         </div>
+
+        <small id="msg-validation" class="danger"></small>
       </div>
     `;
     panelEl.style.display = 'block';
 
-    // Buttons (no behavior yet, just prevent default)
+    // Buttons
     panelEl.querySelector('#btn-reset')?.addEventListener('click', () => {
       for (const fn of resetHandlers) try { fn(); } catch {}
     });
-    panelEl.querySelector('#btn-impact')?.addEventListener('click', () => {
-        window.dispatchEvent(new CustomEvent('panel:navigate', { detail: '/impact' }))
-    });
-    panelEl.querySelector('#btn-mitigate')?.addEventListener('click', () => {
-        window.dispatchEvent(new CustomEvent('panel:navigate', { detail: '/mitigate' }))
+
+    const $mass = panelEl.querySelector('#inp-mass');
+    const $vel  = panelEl.querySelector('#inp-velocity');
+    const $dens = panelEl.querySelector('#sel-density');
+    const $msg  = panelEl.querySelector('#msg-validation');
+
+    // Toggle de los "?" del formulario
+    panelEl.querySelectorAll('.qmark.inline').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.getAttribute('data-tip');
+        const tip = id ? panelEl.querySelector(`#${id}`) : null;
+        if (!tip) return;
+        tip.classList.toggle('show');
+      });
     });
 
-    return; // <— important: do not render the info grid
+    function parseNum(el) {
+      const v = Number(el.value);
+      return isFinite(v) ? v : null;
+    }
+    function clampMass(v) {
+      if (!isFinite(v) || v < 0) return null;
+      return Math.min(v, MAX_MASS_KG);
+    }
+    function clampVel(v) {
+      if (!isFinite(v)) return null;
+      if (v < MIN_VEL_KMS) return MIN_VEL_KMS;
+      if (v > MAX_VEL_KMS) return MAX_VEL_KMS;
+      return v;
+    }
+    function validateAndShow() {
+      const ok = impactorState.massKg !== null &&
+                 impactorState.speedKms !== null &&
+                 impactorState.densityKgM3 !== null;
+      $msg.textContent = ok ? '' : 'Please fill mass, velocity (11–72 km/s) and density.';
+      return ok;
+    }
+
+    const updateMass = () => {
+      const raw = parseNum($mass);
+      const clamped = clampMass(raw);
+      if (clamped !== null && clamped !== raw) $mass.value = clamped;
+      impactorState.massKg = clamped;
+      emitImpactorChange();
+      validateAndShow();
+    };
+    const updateVel = () => {
+      const raw = parseNum($vel);
+      const clamped = clampVel(raw);
+      if (clamped !== null && clamped !== raw) $vel.value = clamped;
+      impactorState.speedKms = (clamped !== null) ? clamped : null;
+      emitImpactorChange();
+      validateAndShow();
+    };
+    const updateDens = () => {
+      const v = Number($dens.value);
+      impactorState.densityKgM3 = isFinite(v) ? v : null;
+      emitImpactorChange();
+      validateAndShow();
+    };
+
+    $mass.addEventListener('input', updateMass);
+    $mass.addEventListener('change', updateMass);
+    $vel.addEventListener('input', updateVel);
+    $vel.addEventListener('change', updateVel);
+    $dens.addEventListener('change', updateDens);
+
+    // Navegación
+    panelEl.querySelector('#btn-impact')?.addEventListener('click', () => {
+      if (validateAndShow()) {
+        window.dispatchEvent(new CustomEvent('panel:navigate', { detail: '/impact' }));
+      }
+    });
+    panelEl.querySelector('#btn-mitigate')?.addEventListener('click', () => {
+      if (validateAndShow()) {
+        window.dispatchEvent(new CustomEvent('panel:navigate', { detail: '/mitigate' }));
+      }
+    });
+
+    return; // <— no renderizamos el modo info
   }
 
   // —— Default info mode ——
@@ -213,7 +352,7 @@ export function showPanelFor(item) {
       <span class="tag">longitude of ascending node (Ω)</span>,
       <span class="tag">argument of periapsis (ω)</span>, and
       <span class="tag">mean anomaly (M) at a given epoch</span>.
-      Using these, we solve Kepler’s equation to get the true position along the orbit.
+      Using these, we solve Kepler’s equation to get the true position.
     </div>
   `;
 
