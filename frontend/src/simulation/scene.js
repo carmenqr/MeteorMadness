@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
 export function createScene(mountNode = null) {
-  
+
   const container = mountNode ?? document.createElement('div')
   if (!mountNode) {
     Object.assign(container.style, {
@@ -12,7 +12,7 @@ export function createScene(mountNode = null) {
   }
 
   const scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x0b1220)
+  scene.background = new THREE.Color(0x000000)
 
   const width = container.clientWidth || window.innerWidth
   const height = container.clientHeight || window.innerHeight
