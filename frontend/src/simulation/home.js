@@ -2,6 +2,8 @@ import * as THREE from 'https://esm.sh/three@0.160.0';
 import { DEG2RAD } from '../lib/asteroid_utils.js';
 import { propagate } from '../lib/orbit_utils.js';
 import { createScene } from './scene.js';
+import { initInfoPanel, showPanelFor, hidePanel, onPanelReset } from './home-panel.js';
+
 
 let asteroides = [];
 let simulationPaused = false;     // pausa/continúa la propagación
@@ -106,19 +108,6 @@ function ensureUI() {
     });
     document.body.appendChild(labels);
   }
-  // Panel de info
-  if (!document.getElementById('info-panel')) {
-    const panel = document.createElement('div');
-    panel.id = 'info-panel';
-    Object.assign(panel.style, {
-      position: 'fixed', top: '12px', left: '12px', width: '320px',
-      maxHeight: '65vh', overflow: 'auto',
-      background: 'rgba(11,18,32,.92)', color: '#e5e7eb',
-      border: '1px solid #ffffff22', borderRadius: '12px',
-      padding: '12px', font: '13px system-ui', zIndex: 25, display: 'none'
-    });
-    document.body.appendChild(panel);
-  }
   // Botón iniciar simulación (top-right)
   if (!document.getElementById('btn-start')) {
     const topbar = document.createElement('div');
@@ -145,29 +134,6 @@ function ensureUI() {
   }
 }
 
-function openInfoPanelFor(item) {
-  const infoPanel = document.getElementById('info-panel');
-  if (!item) { infoPanel.style.display = 'none'; infoPanel.innerHTML = ''; return; }
-  const rows = Object.entries(item.obj).map(([k,v]) =>
-    `<div style="margin:2px 0;"><b>${k}</b>: ${typeof v === 'object' ? JSON.stringify(v) : v}</div>`
-  ).join('');
-  infoPanel.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">
-      <div style="font-weight:600">${item.mesh.name}</div>
-      <div>
-        <button id="btn-reset" style="background:#334155;color:#fff;border:none;border-radius:8px;padding:4px 8px;cursor:pointer">Restaurar</button>
-      </div>
-    </div>
-    ${rows}
-  `;
-  infoPanel.style.display = 'block';
-  // Wrapper: evita que el Event se pase como argumento a resetIsolation
-  document.getElementById('btn-reset').onclick = () => { 
-    resetIsolation();
-    resumeSystem(); // 👈 reanuda la simulación al restaurar
-  };
-}
-
 function isolate(item, list) {
   isolatedItem = item;
   for (const it of list) {
@@ -178,7 +144,7 @@ function isolate(item, list) {
     if (vis && it.pathLine && it.pathLine.material) it.pathLine.material.opacity = 1.0;
     it.labelEl.style.display = vis ? 'block' : 'none';
   }
-  openInfoPanelFor(item);
+  showPanelFor(item); //PARA EL PANEL LATERAL DE INFO
 }
 
 function resetIsolation(listRef) {
@@ -193,8 +159,15 @@ function resetIsolation(listRef) {
     }
     it.labelEl.style.display = 'block';
   }
-  openInfoPanelFor(null);
+  hidePanel();
 }
+
+//PARA EL PANEL LATERAL DE INFO
+onPanelReset(() => {
+  resetIsolation();
+  resumeSystem();
+});
+
 
 // Permite que otra parte de la app restaure (p.ej., al cerrar un modal)
 window.addEventListener('sim:resume-orbits', () => {
@@ -207,6 +180,7 @@ window.addEventListener('sim:resume-orbits', () => {
 // ———————————————————————————————————————
 function iniciarSimulacion() {
   ensureUI();
+  initInfoPanel();
 
   const { scene, camera, renderer, controls } = createScene();
 
