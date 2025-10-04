@@ -7,6 +7,21 @@ let asteroides = [];
 let simulationPaused = false;     // pausa/continúa la propagación
 let isolatedItem = null;          // asteroide aislado (o null)
 
+let tweenCancel = null;   // para abortar un zoom en curso
+
+function freezeSystem() {
+  simulationPaused = true;
+  window.dispatchEvent(new CustomEvent('sim:pause-orbits'));
+}
+
+function resumeSystem() {
+  simulationPaused = false;
+  // si hay un tween de cámara en curso, lo cancelamos
+  if (typeof tweenCancel === 'function') { tweenCancel(); tweenCancel = null; }
+  window.dispatchEvent(new CustomEvent('sim:resume-orbits'));
+}
+
+
 // ———————————————————————————————————————
 // Cargar datos del backend
 // ———————————————————————————————————————
@@ -18,6 +33,25 @@ async function cargarAsteroides() {
     const data = await res.json();
     asteroides = Array.isArray(data) ? data : (data.items || []);
     console.log(`Loaded ${asteroides.length} asteroids from backend`);
+
+    // ——— AÑADIR IMPACTOR2025 CON ÓRBITA PROPIA ———
+    const yaExisteImpactor = asteroides.some(a => /impactor[- ]?2025/i.test(a.name));
+    if (!yaExisteImpactor) {
+      const impactor2025 = {
+        name: "Impactor2025",
+        // Elementos keplerianos (mismas CLAVES que tus asteroides reales)
+        a: 1.20,     // UA (distinto para no superponer)
+        e: 0.15,     // excentricidad moderada
+        i: 25.0,     // grados (inclinación)
+        om: 80.0,    // Ω: nodo ascendente (grados)
+        w: 45.0,     // ω: argumento del perihelio (grados)
+        M0: 0.0,     // anomalía media en epoch (grados)
+        epoch: 2461000.5 // misma época de referencia que usas
+      };
+      asteroides.push(impactor2025);
+      console.log("Añadido Impactor2025 con órbita propia:", impactor2025);
+    }
+
     iniciarSimulacion();
   } catch (error) {
     console.warn("No se pudo cargar asteroides desde backend, intentando mock local. Error:", error);
@@ -75,7 +109,7 @@ function ensureUI() {
     });
     const btn = document.createElement('button');
     btn.id = 'btn-start';
-    btn.textContent = 'Iniciar simulación';
+    btn.textContent = 'Start simulation';
     Object.assign(btn.style, {
       padding: '8px 12px', borderRadius: '10px',
       border: '1px solid #ffffff22', background: '#1d4ed8',
@@ -110,7 +144,10 @@ function openInfoPanelFor(item) {
   `;
   infoPanel.style.display = 'block';
   // Wrapper: evita que el Event se pase como argumento a resetIsolation
-  document.getElementById('btn-reset').onclick = () => resetIsolation();
+  document.getElementById('btn-reset').onclick = () => { 
+    resetIsolation();
+    resumeSystem(); // 👈 reanuda la simulación al restaurar
+  };
 }
 
 function isolate(item, list) {
@@ -197,6 +234,40 @@ function iniciarSimulacion() {
       labelEl: label
     });
   }
+
+  // ——— IMPACTOR2025: localizar, destacar y preparar aislamiento + pausa al abrir panel ———
+  const impactorItem = asteroidMeshes.find(i => /impactor[- ]?2025/i.test(i.mesh.name));
+  if (impactorItem) {
+    // Destacar color del Impactor2025 (opcional)
+    try {
+      impactorItem.mesh.material.color.set(0xffaa00);
+      if (impactorItem.pathLine?.material?.color) {
+        impactorItem.pathLine.material.color.set(0xffaa00);
+        impactorItem.pathLine.material.transparent = true;
+        impactorItem.pathLine.material.opacity = 1.0; // órbita bien visible al aislar
+      }
+    } catch {}
+
+    // Al abrir el panel (botón "Iniciar simulación" o click en Impactor2025)
+    window.addEventListener('sim:open-panel', () => {
+      // Oculta TODOS los demás y muestra solo el Impactor2025
+      isolate(impactorItem, asteroidMeshes);
+
+      // Congela el movimiento donde esté
+      simulationPaused = true;
+
+      // (Opcional) centra cámara cerca del Impactor2025 para enfocarlo
+      try {
+        const target = impactorItem.mesh.position.clone();
+        if (controls) controls.target.copy(target);
+        const dir = new THREE.Vector3(0.6, 0.4, 0.6).normalize();
+        const desired = target.clone().add(dir.multiplyScalar(1.5));
+        camera.position.lerp(desired, 0.7);
+        camera.updateProjectionMatrix();
+      } catch {}
+    });
+  }
+
 
   // Raycaster click (aislar o abrir panel de simulación si es Impactor2025)
   const raycaster = new THREE.Raycaster();
