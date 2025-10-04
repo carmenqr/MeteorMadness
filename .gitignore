@@ -1,7 +1,7 @@
 ############################
 # Python backend
 
-back/env/
+backend/env/
 __pycache__/
 *.pyc
 
