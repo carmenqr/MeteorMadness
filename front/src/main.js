@@ -7,7 +7,7 @@ let asteroides = [];
 
 //Configuración de fuentes de datos
 const config = {
-  dataSource: 'mock', // 'api' | 'mock'
+  dataSource: 'api', // 'api' | 'mock'
   apiUrl: 'http://127.0.0.1:5000/api/asteroides',
   mockUrl: './mock/asteroides_mock.json'
 };
@@ -20,8 +20,10 @@ if (params.has('api')) config.dataSource = 'api';
 async function cargarDesdeAPI() {
   const res = await fetch(config.apiUrl);
   if (!res.ok) throw new Error('API status ' + res.status);
-  return res.json();
+  const data = await res.json();
+  return data.items;
 }
+
 
 async function cargarDesdeMock() {
   const res = await fetch(config.mockUrl);

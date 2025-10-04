@@ -15,3 +15,6 @@ deactivate
 --CLONAR REPOSITORIO EN NUESTRO ORDENADOR
 (en la carpeta donde quieran guardar el proyecto)
 git clone https://github.com/carmenqr/MeteorMadness.git
+
+-API-asteroides NEOS
+export NASA_API_KEY="BrayMFziYdhq2l5OaNMzEnpL46gaVEWEbVjDzOQe"
