@@ -22,31 +22,21 @@ const colorForMMI = (v) => (mmiBreaks.find(b => v <= b.max)?.color ?? lastBreak.
 const labelForMMI = (v) => (mmiBreaks.find(b => v <= b.max)?.label ?? lastBreak.label);
 const descForLabel = (lab) => mmiBreaks.find(b => b.label === lab)?.desc ?? "—";
 
-// --- Fetch helper ---
+// --- Fetch helper (JSON) ---
 async function fetchJson(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`HTTP ${r.status} while loading ${url}`);
   return r.json();
 }
 
-// --- Text fetch helper (for tsunami.gov TXT)
+// --- Text fetch helper (tsunami.gov TXT) ---
 async function fetchText(url) {
   const r = await fetch(url /*, { mode: 'cors' }*/);
   if (!r.ok) throw new Error(`HTTP ${r.status} while loading ${url}`);
   return r.text();
 }
 
-// // Very simple status parser for NWS/NOAA tsunami bulletins
-// function parseTsunamiStatus(txt) {
-//   const t = txt.toUpperCase();
-//   if (/TSUNAMI WARNING/.test(t)) return { level: "warning", label: "Tsunami WARNING" };
-//   if (/TSUNAMI WATCH/.test(t)) return { level: "watch", label: "Tsunami WATCH" };
-//   if (/TSUNAMI ADVISORY/.test(t)) return { level: "advisory", label: "Tsunami ADVISORY" };
-//   if (/NO TSUNAMI THREAT/.test(t) || /THERE IS NO TSUNAMI THREAT/.test(t))
-//     return { level: "no_threat", label: "No tsunami threat" };
-//   return { level: "info", label: "Tsunami information" };
-// }
-
+// --- Badge styling for tsunami status ---
 const badgeStyle = (level) => {
   const base = {
     display: "inline-block",
@@ -66,8 +56,170 @@ const badgeStyle = (level) => {
   return { ...base, ...(palettes[level] || palettes.info) };
 };
 
+// --- Static tsunami bulletin (no CORS) ---
+const STATIC_TSUNAMI_TXT = `WEXX32 PAAQ 250407
+TIBATE
 
-// Find a content URL within a PAGER/losspager product using regex patterns
+Tsunami Information Statement Number 1
+NWS National Tsunami Warning Center Palmer AK
+1207 AM AST Thu Sep 25 2025
+
+...THIS IS A TSUNAMI INFORMATION STATEMENT FOR THE U.S. EAST COAST,
+   GULF OF AMERICA STATES, AND EASTERN CANADA...
+
+EVALUATION
+----------
+ * There is no tsunami danger for the U.S. east coast, the Gulf of 
+   America states, or the eastern coast of Canada. 
+
+ * Based on earthquake information and historic tsunami records, 
+   the earthquake is not expected to generate a tsunami. 
+
+ * An earthquake has occurred with parameters listed below. 
+
+
+PRELIMINARY EARTHQUAKE PARAMETERS
+---------------------------------
+
+ * The following parameters are based on a rapid preliminary
+   assessment of the earthquake and changes may occur.
+
+ * Magnitude      6.4
+ * Origin Time    2352  EDT Sep 24 2025
+                  1152  AST Sep 24 2025
+                  2252  CDT Sep 24 2025
+                  0352  UTC Sep 25 2025
+ * Coordinates    10.0 North 70.8 West
+ * Depth          14 miles
+ * Location       in Venezuela
+
+
+ADDITIONAL INFORMATION AND NEXT UPDATE
+--------------------------------------
+ * Refer to the internet site tsunami.gov for more information. 
+
+ * Caribbean coastal regions should refer to the Pacific 
+   Tsunami Warning Center messages at tsunami.gov. 
+
+ * This will be the only U.S. National Tsunami Warning Center 
+   message issued for this event unless additional information 
+   becomes available. 
+
+$$`;
+
+// --- Minimal Markdown renderer for bold + code + line breaks ---
+function MiniMarkdown({ text }) {
+  const escape = (s) =>
+    s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  const html = escape(text)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\n/g, "<br/>");
+  return <div dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+// --- InfoNote (collapsible educational note) ---
+function InfoNote({ title = "What is this?", children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          fontSize: 12, padding: "6px 8px", borderRadius: 8,
+          border: "1px solid rgba(0,0,0,.15)", background: "#f8fafc",
+          cursor: "pointer"
+        }}
+      >
+        {open ? "Hide" : "Show"} {title}
+      </button>
+      {open && (
+        <div style={{
+          marginTop: 8, background: "#f8fafc", border: "1px solid #e5e7eb",
+          borderRadius: 10, padding: 10, fontSize: 13, lineHeight: 1.45
+        }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Educational help text (EN) ---
+const HELP = {
+  mmi: `
+**MMI (Modified Mercalli Intensity)** describes how shaking is **felt** at the surface, from I (not felt) to X+ (destructive). It is **not** earthquake magnitude—it's **local intensity**.
+
+How to read:
+• Pick an MMI level to highlight its contour (isointensity band).
+• Intensity typically decreases with distance from the source.
+• Local geology, topography, and depth can amplify or damp shaking.
+
+Didactic note: Here we use **USGS-style MMI contours** as a *proxy* for an asteroid impact to explain the concept. A real impact run would compute MMI from impactor energy deposition and wave propagation models.
+`.trim(),
+
+  exposure: `
+**Population exposure** estimates how many people fall within each MMI band by overlaying intensity contours with demographic grids.
+
+How to read the table:
+• Each MMI row shows the estimated people under that intensity.
+• “Total” sums across all bands.
+
+Caveats: values depend on demographic sources and the spatial footprint of shaking. In this demo, exposure is proxied from USGS PAGER.
+`.trim(),
+
+  cities: `
+**Affected cities** (if available) list highly populated places near the source:
+• **Population**: city size.
+• **MMI**: expected intensity felt there.
+• **Dist (km)**: distance to the source.
+
+Use this to get a sense of which cities might feel stronger shaking.
+`.trim(),
+
+  losses: `
+**Human and economic risk** (PAGER) uses **empirical models** from historical events to estimate:
+• **Fatalities** (order-of-magnitude).
+• **Economic losses** (USD).
+
+The alert histogram shows **model uncertainty** (probabilities for different ranges).
+
+Interpretation:
+• Large numbers are not point predictions, but **likely bands**.
+• Building vulnerability, infrastructure, and time of day affect real outcomes.
+
+In this demo, PAGER is used for teaching. A full asteroid-impact pipeline would model shockwave, overpressure, structural response, etc.
+`.trim(),
+
+  tsunami: `
+This section shows a **tsunami bulletin** (static here due to CORS). Typical levels: **Warning**, **Watch**, **Advisory**, **Information**, or **No Tsunami Threat**.
+
+How to read:
+• Header: issuing center and bulletin number.
+• **Evaluation**: whether there is a threat in listed regions.
+• **Event parameters**: magnitude, time, coordinates, depth, location.
+• **Updates**: whether more messages will follow.
+
+Didactic note: No live fetch here; the text teaches the **format and reading**. For real-time data in production, use a backend proxy to call tsunami.gov.
+`.trim(),
+
+  disclaimer: `
+**Didactic note**: This prototype uses a real USGS event as a *proxy* for an asteroid impact. Views and numbers (MMI, exposure, losses) are meant to **explain** the analysis flow. A full system would derive them from **impactor parameters** (size, speed, angle, density) plus **local layers** (population, vulnerability, topography, coastal proximity).
+`.trim(),
+
+  howToUse: `
+Quick guide:
+1) Select an **MMI band** to understand “what it would feel like”.
+2) Check **exposure** to see how many people fall in each range.
+3) Review **losses** to understand orders of magnitude and **uncertainty**.
+4) Look at the **tsunami bulletin** format when the source is coastal/oceanic.
+`.trim()
+};
+
+// --- Helpers for PAGER/losspager ---
 function findContentUrl(contents, patterns) {
   const keys = Object.keys(contents || {});
   for (const pat of patterns) {
@@ -77,19 +229,13 @@ function findContentUrl(contents, patterns) {
   }
   return null;
 }
-
-// Map 1..10 -> Roman used in the UI (10 -> "X+")
 const numToMMI = (n) => {
   const map = { 1: "I", 2: "II", 3: "III", 4: "IV", 5: "V", 6: "VI", 7: "VII", 8: "VIII", 9: "IX", 10: "X+" };
   return map[n] || null;
 };
-
-// Robust aggregator for PAGER exposures (handles the schema you pasted)
 function aggregateExposure(exposureJson) {
   const totals = {};
   labelOrder.forEach(l => (totals[l] = 0));
-
-  // CASE: { population_exposure: { mmi:[1..10], aggregated_exposure:[...] } }
   const pe = exposureJson?.population_exposure;
   if (pe && Array.isArray(pe.mmi) && Array.isArray(pe.aggregated_exposure)) {
     pe.mmi.forEach((mmiNum, idx) => {
@@ -99,8 +245,6 @@ function aggregateExposure(exposureJson) {
     });
     return totals;
   }
-
-  // Fallbacks for other events (kept for robustness)
   const totalsObj =
     exposureJson?.total_population_exposure ||
     exposureJson?.population_exposure_totals ||
@@ -112,7 +256,6 @@ function aggregateExposure(exposureJson) {
     }
     return totals;
   }
-
   if (Array.isArray(exposureJson?.exposures)) {
     exposureJson.exposures.forEach((r) => {
       const m = r.mmi ?? r.label ?? r.bin ?? r.level;
@@ -123,7 +266,6 @@ function aggregateExposure(exposureJson) {
     });
     return totals;
   }
-
   if (exposureJson && typeof exposureJson === "object") {
     for (const [k, v] of Object.entries(exposureJson)) {
       const key = String(k).toUpperCase();
@@ -131,11 +273,8 @@ function aggregateExposure(exposureJson) {
       if (lab in totals) totals[lab] += Number(v) || 0;
     }
   }
-
   return totals;
 }
-
-// Normalize city rows into {name, country, population, mmi, distance}
 function normalizeCities(cityJson) {
   const arr = Array.isArray(cityJson?.cities) ? cityJson.cities
     : Array.isArray(cityJson) ? cityJson
@@ -148,8 +287,6 @@ function normalizeCities(cityJson) {
     distance: Number(c.distance ?? c.dist ?? 0)
   }));
 }
-
-// Parse losses.json → { fatalitiesTotal, dollarsTotal, perCountry[] }
 function parseLosses(lossesJson) {
   const fatalitiesTotal = Number(
     lossesJson?.empirical_fatality?.total_fatalities ?? 0
@@ -157,12 +294,10 @@ function parseLosses(lossesJson) {
   const dollarsTotal = Number(
     lossesJson?.empirical_economic?.total_dollars ?? 0
   );
-
   const perCountry = [];
   const fByCountry = lossesJson?.empirical_fatality?.country_fatalities ?? [];
   const $ByCountry = lossesJson?.empirical_economic?.country_dollars ?? [];
   const byCode = new Map();
-
   fByCountry.forEach((r) => {
     const code = r.country_code || "—";
     byCode.set(code, { code, fatalities: Number(r.fatalities || 0), dollars: 0 });
@@ -175,8 +310,28 @@ function parseLosses(lossesJson) {
   });
   byCode.forEach((v) => perCountry.push(v));
   perCountry.sort((a, b) => (b.dollars || 0) - (a.dollars || 0));
-
   return { fatalitiesTotal, dollarsTotal, perCountry };
+}
+
+// --- NEW: crater helpers ---
+function calculateCraterDiameter() {
+  // Static demo parameters
+  const Dimp = 100; // m
+  const rhoImp = 3000; // kg/m3
+  const rhoTar = 2500; // kg/m3
+  const v = 20000; // m/s
+  const g = 9.81; // m/s2
+  const theta = 45 * Math.PI / 180; // rad
+
+  const Dtr = 1.16 *
+    Math.pow(rhoImp / rhoTar, 1 / 3) *
+    Math.pow(Dimp, 0.78) *
+    Math.pow(v, 0.44) *
+    Math.pow(g, -0.22) *
+    Math.pow(Math.sin(theta), 1 / 3);
+
+  const Dfin = 1.25 * Dtr; // final ≈ 1.25 * transient
+  return { Dtr, Dfin };
 }
 
 export default function ImpactMMI() {
@@ -186,6 +341,12 @@ export default function ImpactMMI() {
   const containerRef = useRef(null);
   const groupRef = useRef(null);
   const contoursLayerRef = useRef(null);
+
+  // NEW: crater management
+  const craterLayerRef = useRef(null);
+  const impactLatLonRef = useRef(null); // keep last impact center for crater
+  const [craterVisible, setCraterVisible] = useState(true);
+
   const navigate = useNavigate();
 
   // UI state
@@ -193,7 +354,7 @@ export default function ImpactMMI() {
   const [selectedLabel, setSelectedLabel] = useState(null);
   const [impactInfo, setImpactInfo] = useState(null);
 
-  // PAGER state (population / cities / losses / histograms)
+  // PAGER state
   const [exposureTotals, setExposureTotals] = useState(null);
   const [cities, setCities] = useState([]);
   const [popLoading, setPopLoading] = useState(false);
@@ -205,22 +366,14 @@ export default function ImpactMMI() {
 
   const [histUrls, setHistUrls] = useState({ fatal: null, econ: null });
 
-  // // TSUNAMI state
-  // const [tsuUrl, setTsuUrl] = useState(
-  //   "https://www.tsunami.gov/events/PAAQ/2025/09/25/t34le6/1/WEXX32/WEXX32.txt"
-  // );
-  // const [tsuLoading, setTsuLoading] = useState(false);
-  // const [tsuError, setTsuError] = useState(null);
-  // const [tsuText, setTsuText] = useState(null);
-  // const [tsuStatus, setTsuStatus] = useState(null);
-  // const [tsuOpen, setTsuOpen] = useState(false); // para plegar/desplegar el <pre>
-
+  // Tsunami (static)
+  const [tsuOpen, setTsuOpen] = useState(false);
+  const tsuStatus = { level: "no_threat", label: "No tsunami threat" };
 
   // Create map once
   useEffect(() => {
     if (!mapRef.current && containerRef.current) {
       const map = L.map(containerRef.current, { zoomControl: true }).setView([20, 0], 2);
-
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 18,
         attribution: "&copy; OpenStreetMap contributors",
@@ -250,6 +403,41 @@ export default function ImpactMMI() {
     return () => clearTimeout(t);
   }, [drawerOpen]);
 
+  // Helper to (re)draw crater ring
+  const drawCraterRing = (lat, lon) => {
+    const map = mapRef.current;
+    const group = groupRef.current;
+    if (!map || !group) return;
+
+    // Remove existing crater if any
+    if (craterLayerRef.current) {
+      group.removeLayer(craterLayerRef.current);
+      craterLayerRef.current = null;
+    }
+
+    if (!craterVisible) return;
+
+    const { Dfin } = calculateCraterDiameter();
+    const radiusMeters = Math.max(1, Dfin / 2); // ensure >= 1 m
+
+    const craterCircle = L.circle([lat, lon], {
+      radius: radiusMeters,
+      color: "#111",
+      weight: 2,
+      opacity: 0.85,
+      fillColor: "#ff3b30",
+      fillOpacity: 0.15
+    });
+
+    craterCircle.bindTooltip(
+      `Crater ring (final) ≈ ${Dfin.toFixed(1)} m diameter`,
+      { direction: "top", permanent: false, opacity: 0.9 }
+    );
+
+    craterCircle.addTo(group);
+    craterLayerRef.current = craterCircle;
+  };
+
   // Load event + contours + PAGER/losspager JSONs/PNGs
   useEffect(() => {
     const map = mapRef.current;
@@ -259,7 +447,7 @@ export default function ImpactMMI() {
     group.clearLayers();
     contoursLayerRef.current = null;
 
-    // reset UI slices
+    // reset slices
     setExposureTotals(null);
     setCities([]);
     setPopError(null);
@@ -271,35 +459,45 @@ export default function ImpactMMI() {
 
     setHistUrls({ fatal: null, econ: null });
 
-    const DETAIL_URL = `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&eventid=${eventId}`;
     let abort = false;
+    const DETAIL_URL = `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&eventid=${eventId}`;
 
     (async () => {
       try {
         const detail = await fetchJson(DETAIL_URL);
         if (abort) return;
 
-        // “Impact point” proxy
+        // Impact proxy point
         const [lon, lat, depth] = detail.geometry.coordinates;
         const whenISO = new Date(detail.properties.time).toISOString();
         const mag = detail.properties.mag;
         const place = detail.properties.place || "—";
 
         setImpactInfo({ magnitude: mag, place, whenISO });
+        impactLatLonRef.current = { lat, lon };
 
+        // Impact marker with a nicer popup including an image
         L.circleMarker([lat, lon], {
           radius: 6, weight: 2, color: "#111", fillColor: "#ffcc00", fillOpacity: 0.9
         })
           .bindPopup(
-            `<strong>Impact point (demo)</strong><br>` +
-            `Proxy magnitude: M ${mag}<br>` +
-            `${place}<br>` +
-            `${whenISO.replace("T", " ").slice(0, 19)} UTC<br>` +
-            `Proxy depth: ${depth} km`
+            `<strong>Impact point (demo)</strong><br>
+             Proxy magnitude: M ${mag}<br>
+             ${place}<br>
+             ${whenISO.replace("T", " ").slice(0, 19)} UTC<br>
+             Proxy depth: ${depth} km<br>
+             <div style="margin-top:6px">
+               <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Barringer_Crater_-_Arizona.jpg" 
+                    alt="Crater example" 
+                    style="width:260px;height:auto;border-radius:6px;border:1px solid #e5e7eb"/>
+             </div>`
           )
           .addTo(group);
 
-        // Shake-style MMI contours (proxy for impact ground motion)
+        // Draw crater ring (new)
+        drawCraterRing(lat, lon);
+
+        // Shake-style MMI contours
         const shakemap = (detail.properties?.products?.shakemap || [])[0];
         if (shakemap?.contents) {
           const contKey = Object.keys(shakemap.contents).find(k =>
@@ -334,7 +532,7 @@ export default function ImpactMMI() {
           }
         }
 
-        // Fit to current layers
+        // Fit to layers
         if (!abort) {
           if (group.getLayers().length > 0) {
             map.fitBounds(group.getBounds().pad(0.2));
@@ -344,14 +542,12 @@ export default function ImpactMMI() {
           map.invalidateSize();
         }
 
-        // === Load PAGER/LOSsPAGER JSONs/PNGs ===
+        // === Load PAGER/losspager JSONs/PNGs ===
         const pager = (detail.properties?.products?.losspager
           ?? detail.properties?.products?.pager
           ?? [])[0];
 
         if (pager?.contents && !abort) {
-          console.log("[losspager contents]", Object.keys(pager.contents));
-
           setPopLoading(true);
 
           const exposureUrl = findContentUrl(pager.contents, [
@@ -360,20 +556,16 @@ export default function ImpactMMI() {
             "exposures.*\\.json$",
             "population.*exposure.*\\.json$"
           ]);
-
           const cityUrl = findContentUrl(pager.contents, [
             "^json/cities\\.json$",
             "city.*\\.json$",
             ".*city.*exposure.*\\.json$"
           ]);
-
           const lossesUrl = findContentUrl(pager.contents, [
             "^json/losses\\.json$",
             "loss.*\\.json$",
             "economic.*\\.json$"
           ]);
-
-          // Histogram PNGs (prefer full size, fallback to small/smaller)
           const fatalPng = findContentUrl(pager.contents, [
             "^alertfatal\\.png$",
             "alertfatal_small\\.png$",
@@ -406,10 +598,7 @@ export default function ImpactMMI() {
               setLossError("Could not load losses.json");
             }
 
-            setHistUrls({
-              fatal: fatalPng || null,
-              econ: econPng || null
-            });
+            setHistUrls({ fatal: fatalPng || null, econ: econPng || null });
           }
         } else {
           setPopError("No losspager product available for this event.");
@@ -428,7 +617,7 @@ export default function ImpactMMI() {
     })();
 
     return () => { abort = true; };
-  }, [eventId, selectedLabel]);
+  }, [eventId, selectedLabel, craterVisible]); // NOTE: re-draw crater if visibility changes
 
   // Restyle when MMI filter changes (no refetch)
   useEffect(() => {
@@ -449,64 +638,26 @@ export default function ImpactMMI() {
     });
   }, [selectedLabel]);
 
-/*   // Carga del boletín de tsunami.gov con fallback vía proxy backend
+  // When craterVisible toggles, redraw crater at last known impact center
   useEffect(() => {
-    let aborted = false;
-    if (!tsuUrl) return;
-
-    (async () => {
-      setTsuLoading(true);
-      setTsuError(null);
-      setTsuText(null);
-      setTsuStatus(null);
-
-      // 1) Intento directo
-      const tryFetch = async (url) => {
-        try {
-          const txt = await fetchText(url);
-          if (aborted) return;
-          setTsuText(txt);
-          setTsuStatus(parseTsunamiStatus(txt));
-          setTsuLoading(false);
-          return true;
-        } catch (e) {
-          return false;
-        }
-      };
-
-      // 2) Si falla (CORS), probar vía proxy backend
-      const proxiedUrl =
-        (import.meta.env?.VITE_API_URL
-          ? `${import.meta.env.VITE_API_URL.replace(/\/$/, "")}/api/proxy?url=${encodeURIComponent(tsuUrl)}`
-          : `/api/proxy?url=${encodeURIComponent(tsuUrl)}`);
-
-      const okDirect = await tryFetch(tsuUrl);
-      if (!okDirect) {
-        const okProxy = await tryFetch(proxiedUrl);
-        if (!okProxy && !aborted) {
-          setTsuError("Network/CORS error fetching bulletin (direct and proxy).");
-          setTsuLoading(false);
-        }
-      }
-    })();
-
-    return () => { aborted = true; };
-  }, [tsuUrl]);
- */
+    const center = impactLatLonRef.current;
+    if (!center) return;
+    drawCraterRing(center.lat, center.lon);
+  }, [craterVisible]);
 
   // UI helpers
   const mmiOptions = useMemo(() => labelOrder.map(lab => ({
     label: lab,
     color: mmiBreaks.find(b => b.label === lab)?.color
   })), []);
-
   const totalPeople = useMemo(() => {
     if (!exposureTotals) return 0;
     return Object.values(exposureTotals).reduce((a, b) => a + (Number(b) || 0), 0);
   }, [exposureTotals]);
-
   const fmtUSD0 = (n) =>
     Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+  const { Dtr, Dfin } = calculateCraterDiameter();
 
   return (
     <div style={{ position: "fixed", inset: 0 }}>
@@ -516,11 +667,11 @@ export default function ImpactMMI() {
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", background: "#e5e7eb", zIndex: 0 }}
       />
 
-      {/* Title box (moved to top-right, below Back to home button) */}
+      {/* Title box */}
       <div style={{
         position: "absolute",
-        top: 56,              // debajo del botón "Back to home" (que está en top:12)
-        right: 12,            // ahora a la derecha, no se tapa con el drawer
+        top: 56,
+        right: 12,
         background: "rgba(255,255,255,.9)",
         padding: "8px 10px",
         borderRadius: 10,
@@ -566,13 +717,15 @@ export default function ImpactMMI() {
       >
         <h3 style={{ margin: "6px 0 10px" }}>Impact Consequences</h3>
 
-        {/* Step 1: Impact shaking (MMI) */}
+        {/* Step 1: Ground shaking (MMI) */}
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>1) Ground shaking (MMI)</div>
-
           <div style={{ marginBottom: 6, opacity: .8 }}>
             “What does this intensity feel like?”
           </div>
+          <InfoNote title="Explanation (MMI)">
+            <MiniMarkdown text={HELP.mmi} />
+          </InfoNote>
 
           {/* MMI selector */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6 }}>
@@ -617,6 +770,10 @@ export default function ImpactMMI() {
         <div style={{ marginTop: 18 }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>2) Exposed population</div>
 
+          <InfoNote title="How is exposure estimated?">
+            <MiniMarkdown text={HELP.exposure} />
+          </InfoNote>
+
           {popLoading && (
             <div style={{ fontSize: 12, opacity: .8 }}>Loading exposure data…</div>
           )}
@@ -659,48 +816,48 @@ export default function ImpactMMI() {
                   </tbody>
                 </table>
               </div>
-              <div style={{ marginTop: 6, fontSize: 12, opacity: .65 }}>
-                Note: PAGER exposure is derived from the proxy event; real impact runs would compute it from the impactor parameters and local demographics.
-              </div>
-            </div>
-          )}
 
-          {/* City list (renders only if cities.json exists for the event) */}
-          {!!cities.length && (
-            <div style={{ marginTop: 14 }}>
-              <div style={{ fontSize: 13, marginBottom: 6, opacity: .75 }}>
-                Affected cities (top 10 by population)
-              </div>
-              <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                  <thead style={{ background: "#f8fafc" }}>
-                    <tr>
-                      <th style={{ textAlign: "left", padding: "6px 8px" }}>City</th>
-                      <th style={{ textAlign: "left", padding: "6px 8px" }}>Country/Region</th>
-                      <th style={{ textAlign: "right", padding: "6px 8px" }}>Population</th>
-                      <th style={{ textAlign: "center", padding: "6px 8px" }}>MMI</th>
-                      <th style={{ textAlign: "right", padding: "6px 8px" }}>Dist (km)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cities
-                      .slice()
-                      .sort((a, b) => (b.population || 0) - (a.population || 0))
-                      .slice(0, 10)
-                      .map((c, idx) => (
-                        <tr key={`${c.name}-${idx}`} style={{ borderTop: "1px solid #f1f5f9" }}>
-                          <td style={{ padding: "6px 8px" }}>{c.name}</td>
-                          <td style={{ padding: "6px 8px" }}>{c.country || "—"}</td>
-                          <td style={{ padding: "6px 8px", textAlign: "right" }}>{(c.population || 0).toLocaleString()}</td>
-                          <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: 600 }}>{c.mmi || "—"}</td>
-                          <td style={{ padding: "6px 8px", textAlign: "right" }}>
-                            {Number.isFinite(c.distance) ? c.distance.toFixed(1) : "—"}
-                          </td>
+              {!!cities.length && (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ fontSize: 13, marginBottom: 6, opacity: .75 }}>
+                    Affected cities (top 10 by population)
+                  </div>
+                  <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                      <thead style={{ background: "#f8fafc" }}>
+                        <tr>
+                          <th style={{ textAlign: "left", padding: "6px 8px" }}>City</th>
+                          <th style={{ textAlign: "left", padding: "6px 8px" }}>Country/Region</th>
+                          <th style={{ textAlign: "right", padding: "6px 8px" }}>Population</th>
+                          <th style={{ textAlign: "center", padding: "6px 8px" }}>MMI</th>
+                          <th style={{ textAlign: "right", padding: "6px 8px" }}>Dist (km)</th>
                         </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
+                      </thead>
+                      <tbody>
+                        {cities
+                          .slice()
+                          .sort((a, b) => (b.population || 0) - (a.population || 0))
+                          .slice(0, 10)
+                          .map((c, idx) => (
+                            <tr key={`${c.name}-${idx}`} style={{ borderTop: "1px solid #f1f5f9" }}>
+                              <td style={{ padding: "6px 8px" }}>{c.name}</td>
+                              <td style={{ padding: "6px 8px" }}>{c.country || "—"}</td>
+                              <td style={{ padding: "6px 8px", textAlign: "right" }}>{(c.population || 0).toLocaleString()}</td>
+                              <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: 600 }}>{c.mmi || "—"}</td>
+                              <td style={{ padding: "6px 8px", textAlign: "right" }}>
+                                {Number.isFinite(c.distance) ? c.distance.toFixed(1) : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <InfoNote title="What does the cities table mean?">
+                    <MiniMarkdown text={HELP.cities} />
+                  </InfoNote>
+                </div>
+              )}
             </div>
           )}
 
@@ -730,6 +887,10 @@ export default function ImpactMMI() {
         {/* Step 3: Economic & fatality risk */}
         <div style={{ marginTop: 18 }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>3) Economic & fatality risk</div>
+
+          <InfoNote title="How to interpret losses and the histogram">
+            <MiniMarkdown text={HELP.losses} />
+          </InfoNote>
 
           {lossLoading && <div style={{ fontSize: 12, opacity: .8 }}>Loading losses…</div>}
           {lossError && (
@@ -787,7 +948,6 @@ export default function ImpactMMI() {
                 </div>
               )}
 
-              {/* Economic histogram ONLY in Step 3 */}
               {histUrls.econ && (
                 <div style={{ marginTop: 14 }}>
                   <div style={{ fontSize: 13, marginBottom: 6, opacity: .75 }}>
@@ -807,73 +967,101 @@ export default function ImpactMMI() {
           )}
         </div>
 
-        {/* Step 4: Tsunami (bulletin from tsunami.gov) 
+        {/* Step 3.5: Crater size */}
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>3.5) Crater size estimation</div>
+
+          <InfoNote title="How is crater size estimated?">
+            <MiniMarkdown text={`
+We use the **Holsapple–Schmidt scaling law** to estimate the diameter of the crater:
+
+- Inputs: impactor size, density, velocity, angle, target density, and gravity.  
+- Formula gives a **transient crater** (initial excavation).  
+- Final crater is ~25% larger.  
+
+⚠️ Here values are **static demo parameters** (asteroid: 100 m, 20 km/s, 45° impact).
+    `} />
+          </InfoNote>
+
+          <div style={{ marginTop: 8, border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
+            <div><strong>Transient crater:</strong> {Dtr.toFixed(1)} m</div>
+            <div><strong>Final crater:</strong> {Dfin.toFixed(1)} m</div>
+
+            {/* NEW: toggle crater visibility */}
+            <button
+              onClick={() => setCraterVisible(v => !v)}
+              style={{
+                marginTop: 10,
+                fontSize: 12, padding: "6px 10px",
+                borderRadius: 8, cursor: "pointer",
+                border: "1px solid rgba(0,0,0,.15)", background: "#fff"
+              }}
+              title="Toggle crater ring on the map"
+            >
+              {craterVisible ? "Hide crater" : "Show crater"}
+            </button>
+          </div>
+        </div>
+
+        {/* Step 4: Tsunami (static bulletin) */}
         <div style={{ marginTop: 18 }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>4) Tsunami</div>
 
           <div style={{ fontSize: 13, opacity: .75, marginBottom: 6 }}>
-            Live bulletin fetched from <code>tsunami.gov</code>.
+            Static bulletin (CORS blocked live fetch). Source: <code>tsunami.gov</code>
           </div>
 
-          {tsuLoading && <div style={{ fontSize: 12, opacity: .8 }}>Checking tsunami bulletin…</div>}
-          {tsuError && (
-            <div style={{
-              fontSize: 12, color: "#b91c1c", background: "#fee2e2", border: "1px solid #fecaca",
-              padding: 8, borderRadius: 8
-            }}>
-              Could not load bulletin: {tsuError}<br />
-              {/* Sugerencia si CORS: 
-              If this is a CORS issue, route via your backend proxy (/api/proxy).
-            </div>
-          )}
+          <InfoNote title="How to read a tsunami bulletin">
+            <MiniMarkdown text={HELP.tsunami} />
+          </InfoNote>
 
-          {tsuStatus && (
-            <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10, background: "#fff" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                <span style={badgeStyle(tsuStatus.level)}>{tsuStatus.label}</span>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <a href={tsuUrl} target="_blank" rel="noreferrer"
-                    style={{ fontSize: 12, textDecoration: "underline" }}>Open TXT</a>
-                  <button
-                    onClick={() => setTsuOpen(v => !v)}
-                    style={{
-                      fontSize: 12, padding: "6px 8px", borderRadius: 8,
-                      border: "1px solid rgba(0,0,0,.15)", background: "#f8fafc", cursor: "pointer"
-                    }}
-                  >
-                    {tsuOpen ? "Hide details" : "Show details"}
-                  </button>
-                </div>
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10, background: "#fff", marginTop: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <span style={badgeStyle(tsuStatus.level)}>{tsuStatus.label}</span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <a
+                  href="https://www.tsunami.gov/"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ fontSize: 12, textDecoration: "underline" }}
+                >
+                  Open tsunami.gov
+                </a>
+                <button
+                  onClick={() => setTsuOpen(v => !v)}
+                  style={{
+                    fontSize: 12, padding: "6px 8px", borderRadius: 8,
+                    border: "1px solid rgba(0,0,0,.15)", background: "#f8fafc", cursor: "pointer"
+                  }}
+                >
+                  {tsuOpen ? "Hide details" : "Show details"}
+                </button>
               </div>
-
-              {tsuOpen && tsuText && (
-                <pre style={{
-                  marginTop: 10, maxHeight: 260, overflow: "auto",
-                  background: "#f8fafc", border: "1px solid #e5e7eb",
-                  borderRadius: 8, padding: 10, whiteSpace: "pre-wrap"
-                }}>{tsuText}</pre>
-              )}
             </div>
-          )}
 
-          {/* (opcional) permitir cambiar la URL del TXT en runtime 
-          <div style={{ marginTop: 10, fontSize: 12, opacity: .7 }}>
-            Source TXT:&nbsp;
-            <input
-              value={tsuUrl}
-              onChange={(e) => setTsuUrl(e.target.value)}
-              style={{ width: "100%", padding: "6px 8px", borderRadius: 8, border: "1px solid #e5e7eb" }}
-              placeholder="https://www.tsunami.gov/.../WEXX32.txt"
-            />
+            {tsuOpen && (
+              <pre style={{
+                marginTop: 10, maxHeight: 260, overflow: "auto",
+                background: "#f8fafc", border: "1px solid #e5e7eb",
+                borderRadius: 8, padding: 10, whiteSpace: "pre-wrap"
+              }}>
+                {STATIC_TSUNAMI_TXT}
+              </pre>
+            )}
           </div>
-        </div> 
-        */}
 
-
-        {/* Small note */}
-        <div style={{ marginTop: 16, fontSize: 12, opacity: .65 }}>
-          This is a didactic demo. Replace the proxy PAGER with your own impact-run outputs for fully realistic impact consequences.
+          <div style={{ marginTop: 8, fontSize: 12, opacity: .65 }}>
+            Note: This is a didactic static message. For live data later, enable a backend proxy to bypass CORS and fetch TXT bulletins.
+          </div>
         </div>
+
+        <InfoNote title="How to use this view (quick guide)">
+          <MiniMarkdown text={HELP.howToUse} />
+        </InfoNote>
+
+        <InfoNote title="Didactic disclaimer">
+          <MiniMarkdown text={HELP.disclaimer} />
+        </InfoNote>
       </div>
 
       {/* Drawer toggle */}
@@ -908,6 +1096,6 @@ export default function ImpactMMI() {
       >
         Back to home
       </button>
-    </div >
+    </div>
   );
 }
