@@ -73,18 +73,25 @@ def get_neos():
 def get_asteroides():
     return get_neos()
 
-""" #Datos a mandar
-asteroides = [
-    { "name": "433 Eros", "a": 1.458, "e": 0.2228, "i": 10.83, "om": 304.27, "w": 178.93, "M0": 310.55, "epoch": 2461000.5 },
-    { "name": "719 Albert", "a": 2.637, "e": 0.5466, "i": 11.57, "om": 183.86, "w": 156.19, "M0": 240.61, "epoch": 2461000.5 },
-    { "name": "887 Alinda", "a": 2.474, "e": 0.5712, "i": 9.40, "om": 110.41, "w": 350.53, "M0": 81.54, "epoch": 2461000.5 },
-    { "name": "1036 Ganymed", "a": 2.665, "e": 0.5332, "i": 26.68, "om": 215.44, "w": 132.50, "M0": 97.59, "epoch": 2461000.5 }
-]
+def get_earth_orbit_json():
+    earth_orbit = {
+        "id": "earth",
+        "name": "Earth",
+        "hazardous": False,
+        "a": 1.00000011,        # Semi-major axis (AU)
+        "e": 0.01671022,        # Eccentricity
+        "i": 0.00005,           # Inclination (degrees)
+        "om": -11.26064,        # Longitude of ascending node (degrees)
+        "w": 102.94719,         # Argument of perihelion (degrees)
+        "epoch": 2451545.0,     # Epoch (Julian Date, J2000.0)
+        "mean_anomaly_deg": 100.46435,  # Mean anomaly (degrees)
+        "M0": 0.9856076686,     # Mean motion (degrees/day)
+    }
+    return jsonify(earth_orbit)
 
-#Define ruta en el servidor, para acceder a ella usar /api/asteroides
-@app.route("/api/asteroides", methods=["GET"])
-def get_asteroides():
-    return jsonify(asteroides) """
+@app.route("/api/earth", methods=["GET"])
+def get_earth():
+    return get_earth_orbit_json()
 
 #Ruta para recibir datos en general
 @app.route("/api/send-general", methods=["POST"])
