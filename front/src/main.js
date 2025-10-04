@@ -3,6 +3,9 @@ import { DEG2RAD } from './asteroides.js';
 import { propagarOrbita } from './orbitUtils.js';
 import { createScene } from './scene.js';
 
+let earthData = null;      // elementos orbitales de la Tierra (del backend)
+let earthItem = null;      // referencia a su mesh/órbita/label
+
 let asteroides = [];
 let simulationPaused = false;     // pausa/continúa la propagación
 let isolatedItem = null;          // asteroide aislado (o null)
@@ -51,6 +54,23 @@ async function cargarAsteroides() {
       asteroides.push(impactor2025);
       console.log("Añadido Impactor2025 con órbita propia:", impactor2025);
     }
+
+    // === AÑADIR: Cargar Earth desde el backend ===
+    try {
+      const resEarth = await fetch("http://127.0.0.1:5000/api/earth");
+      if (resEarth.ok) {
+        const d = await resEarth.json();
+        // Esperamos mismas claves: { name, a, e, i, om, w, M0, epoch }
+        earthData = Array.isArray(d) ? d[0] : d;
+        if (!earthData?.name) earthData.name = "Earth";
+        console.log("Earth loaded:", earthData);
+      } else {
+        console.warn("No se pudo cargar /api/earth:", resEarth.status);
+      }
+    } catch (e) {
+      console.warn("Error cargando /api/earth:", e);
+    }
+
 
     iniciarSimulacion();
   } catch (error) {
@@ -196,6 +216,43 @@ function iniciarSimulacion() {
   const asteroidMeshes = [];              // mantenemos tu nombre
   window.__asteroidMeshes = asteroidMeshes; // acceso para resetIsolation externo
 
+  // Si tenemos datos de la Tierra, crear su mesh + órbita + label
+  if (earthData) {
+    try {
+      const geomE = new THREE.SphereGeometry(0.095, 32, 32);
+      const matE = new THREE.MeshPhongMaterial({ color: 0x2b6fff, emissive: 0x051022 });
+      const meshE = new THREE.Mesh(geomE, matE);
+      meshE.name = earthData.name || 'Earth';
+
+      const pathGeomE = new THREE.BufferGeometry().setFromPoints([]);
+      const pathMatE = new THREE.LineBasicMaterial({ color: 0x2b6fff, transparent: true, opacity: 0.25 });
+      const pathLineE = new THREE.Line(pathGeomE, pathMatE);
+      scene.add(pathLineE);
+      scene.add(meshE);
+
+      const labelE = document.createElement('div');
+      labelE.className = 'asteroid-label';
+      labelE.textContent = meshE.name;
+      Object.assign(labelE.style, {
+        position: 'absolute', transform: 'translate(-50%,-100%)', padding: '2px 6px',
+        background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: '8px',
+        font: '12px system-ui', whiteSpace: 'nowrap', pointerEvents: 'none'
+      });
+      labelLayer.appendChild(labelE);
+
+      earthItem = {
+        mesh: meshE,
+        obj: earthData,
+        pathLine: pathLineE,
+        pathGeom: pathGeomE,
+        pathPoints: [],
+        lastM: (earthData.M0 ?? 0) * DEG2RAD,
+        labelEl: labelE
+      };
+      asteroidMeshes.push(earthItem);
+    } catch (e) { console.warn('No se pudo crear mesh de Earth:', e); }
+  }
+
   // Crear asteroides + trayectorias + labels
   for (let obj of asteroides) {
     const geom = new THREE.SphereGeometry(0.03, 16, 16);
@@ -304,7 +361,7 @@ function iniciarSimulacion() {
   function animate() {
     requestAnimationFrame(animate);
 
-    let days = (Date.now() - t0) / 1000;
+    let days = (Date.now() - t0) / 10;
     let tJulian = 2461000.5 + days;
 
     for (let item of asteroidMeshes) {
