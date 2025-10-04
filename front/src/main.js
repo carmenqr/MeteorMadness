@@ -118,7 +118,9 @@ function isolate(item, list) {
   for (const it of list) {
     const vis = (it === item);
     it.mesh.visible = vis;
-    it.pathLine.visible = vis;
+    // Ocultamos las órbitas no seleccionadas y resaltamos la del seleccionado
+    if (it.pathLine) it.pathLine.visible = vis;
+    if (vis && it.pathLine && it.pathLine.material) it.pathLine.material.opacity = 1.0;
     it.labelEl.style.display = vis ? 'block' : 'none';
   }
   openInfoPanelFor(item);
@@ -129,7 +131,11 @@ function resetIsolation(listRef) {
   isolatedItem = null;
   for (const it of list) {
     it.mesh.visible = true;
-    it.pathLine.visible = true;
+    // Restaurar visibilidad y opacidad por defecto de las órbitas
+    if (it.pathLine) {
+      it.pathLine.visible = true;
+      if (it.pathLine.material) it.pathLine.material.opacity = 0.25;
+    }
     it.labelEl.style.display = 'block';
   }
   openInfoPanelFor(null);
@@ -155,14 +161,15 @@ function iniciarSimulacion() {
 
   // Crear asteroides + trayectorias + labels
   for (let obj of asteroides) {
-    const geom = new THREE.SphereGeometry(0.05, 16, 16);
+    const geom = new THREE.SphereGeometry(0.03, 16, 16);
     const mat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
     const mesh = new THREE.Mesh(geom, mat);
     mesh.name = obj.name || 'Asteroide';
 
-    const pathGeom = new THREE.BufferGeometry().setFromPoints([]);
-    const pathMat = new THREE.LineBasicMaterial({ color: 0x00ff00 });
-    const pathLine = new THREE.Line(pathGeom, pathMat);
+  const pathGeom = new THREE.BufferGeometry().setFromPoints([]);
+  // Órbitas atenuadas por defecto
+  const pathMat = new THREE.LineBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.25 });
+  const pathLine = new THREE.Line(pathGeom, pathMat);
     scene.add(pathLine);
     scene.add(mesh);
 
