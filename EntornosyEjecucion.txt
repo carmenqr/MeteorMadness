@@ -1,13 +1,16 @@
---ACTIVACIÓN DEL ENTORNO (EN TERMINAL)
+--ACTIVACIÓN DEL ENTORNO (BACK - EN TERMINAL)
 cd back
 python -m venv env
 source env/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt (CADA VEZ SI SE HAN AÑADIDO MAS REQUIREMENTS)
 (actualización de requirements.txt por si acaso): pip freeze > requirements.txt
+
+-ACTUALIZAR ENTORNO Y DEPENDENCIAS (FRONT - EN TERMINAL)
+npm ci          -- Instala archivos del package-lock.json, falla si package.json y package-lock.json no coinciden
 
 --EJECUCIÓN DE LA APP
     --BACK (desde carpeta back): python app.py
-    --FRONT (desde carpeta front): python -m http.server
+    --FRONT (desde carpeta front): npm run dev
 
 --DESACTIVACIÓN DEL ENTORNO (EN TERMINAL)
 deactivate
@@ -16,5 +19,30 @@ deactivate
 (en la carpeta donde quieran guardar el proyecto)
 git clone https://github.com/carmenqr/MeteorMadness.git
 
--API-asteroides NEOS
+-API-asteroides NEOS (SOLO UNA VEZ)
 export NASA_API_KEY="BrayMFziYdhq2l5OaNMzEnpL46gaVEWEbVjDzOQe"
+
+--INSTALA ULTIMA VERSION NODE (usa la del .nvmrc)
+nvm use
+
+--INSTALAR NUEVA DEPENDENCIA
+npm i paquete@versión         # o npm i -D paquete  (si es devDependency)
+git add package.json package-lock.json
+git commit -m "feat: add paquete"
+git push
+
+Archivos que deben estar versionados:
+    package.json y lockfile (package-lock.json o pnpm-lock.yaml / yarn.lock).
+    Código fuente, config de Vite, etc.
+    .env.example (plantilla de variables), no el .env real.
+
+Archivos que NO deben subirse
+    node_modules/
+    .env (credenciales/URLs reales)
+    Builds (dist/) salvo que queráis adjuntarlos por alguna razón.
+
+
+--GUIA USO FRONT (alguien nuevo)
+//INSTALA NVM Y RECARGA LA SESION
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+export NVM_DIR="$HOME/.nvm" [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
