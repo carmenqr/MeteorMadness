@@ -34,6 +34,9 @@ let _sceneRefs = null;         // guardamos {scene,camera,renderer,controls}
 let _visibilityHandler = null;
 let _resizeHandler = null;
 
+let _earthPin = null; // { impactorMesh, earthMesh, camera, controls, targetNDC, depthOffset, lockControls }
+function _easeSmoothstep(u){ return u<=0?0:u>=1?1:u*u*(3-2*u); }
+
 function freezeSystem() {
   simulationPaused = true;
   window.dispatchEvent(new CustomEvent('sim:pause-orbits'));
@@ -63,6 +66,123 @@ function tweenCamera({camera, controls, fromPos, toPos, fromTarget, toTarget, du
   raf = requestAnimationFrame(step);
   return ()=>{ stop = true; cancelAnimationFrame(raf); };
 }
+
+// Fija la Tierra en una esquina de la pantalla (NDC) respecto al IMPACTOR (centro)
+function startPinEarthToCorner({
+  impactorMesh, earthMesh, camera, controls,
+  targetNDC = { x: -0.94, y: -0.97 },
+  earthDepthFactor = 0.80,     // <1 → Tierra más cerca que el impactor (se ve mayor)
+  depthOffset = null,          // se ignora si hay factor
+  keepCameraDistance = 0.40,   // zoom objetivo
+  earthScale = 2.3,            // tamaño objetivo
+  viewOffset = { yawDeg: -14, pitchDeg: 6 }, // giro objetivo
+  lockControls = true,
+  transitionMs = 900,          // ← duración transición suave
+  fadeOrbits = true            // ← difuminar órbitas durante el zoom
+} = {}) {
+  if (!impactorMesh || !earthMesh || !camera) return;
+
+  // escala original Tierra
+  if (!earthMesh.userData.__origScale) {
+    earthMesh.userData.__origScale = earthMesh.scale.clone();
+  }
+  const startEarthScale = earthMesh.scale.x; // asumimos uniform
+
+  // estado inicial para tween de cámara (distancia + yaw/pitch alrededor del impactor)
+  const pI = impactorMesh.position.clone();
+  const vCam = camera.position.clone().sub(pI);
+  let startDist = vCam.length(); if (startDist < 1e-6) startDist = keepCameraDistance;
+  const dir = vCam.length() > 1e-6 ? vCam.clone().normalize() : new THREE.Vector3(0,0,1);
+
+  // yaw (alrededor de Y mundial) y pitch (alrededor de eje lateral)
+  const upWorld = new THREE.Vector3(0,1,0);
+  // Proyección horizontal para yaw
+  const horiz = dir.clone(); horiz.y = 0; if (horiz.lengthSq()<1e-8) horiz.set(0,0,1); horiz.normalize();
+  let startYaw = Math.atan2(horiz.x, horiz.z);                 // [-π, π], z adelante
+  const sideAxis = new THREE.Vector3().crossVectors(upWorld, horiz).normalize();
+  // ángulo entre horiz y dir sobre sideAxis (pitch positivo = mirar hacia abajo un poco)
+  const dot = THREE.MathUtils.clamp(dir.dot(horiz), -1, 1);
+  let startPitch = Math.acos(dot); if (dir.y > 0) startPitch = -startPitch;
+
+  // destino
+  const targetYaw = (viewOffset?.yawDeg ?? 0) * Math.PI / 180;
+  const targetPitch = (viewOffset?.pitchDeg ?? 0) * Math.PI / 180;
+
+  // preparar fade de órbitas
+  const orbits = [];
+  if (fadeOrbits) {
+    const list = window.__asteroidMeshes || [];
+    for (const it of list) {
+      if (it.pathLine && it.pathLine.material) {
+        const mat = it.pathLine.material;
+        if (!mat.userData) mat.userData = {};
+        if (typeof mat.userData.__origOpacity !== 'number') {
+          mat.userData.__origOpacity = mat.opacity ?? 1;
+        }
+        mat.transparent = true;
+        orbits.push(it.pathLine);
+      }
+    }
+  }
+
+  _earthPin = {
+    impactorMesh, earthMesh, camera, controls,
+    targetNDC, earthDepthFactor, depthOffset,
+    keepCameraDistance, earthScale, viewOffset,
+    lockControls,
+
+    // transición
+    t0: performance.now(),
+    dur: Math.max(0, transitionMs|0),
+    startDist, targetDist: keepCameraDistance,
+    startYaw, targetYaw,
+    startPitch, targetPitch,
+    startEarthScale,
+
+    // órbitas
+    orbits, fadedDone: false
+  };
+
+  // fijar target al impactor y bloquear controles si procede
+  if (controls) {
+    if (lockControls) controls.enabled = false;
+    controls.target.copy(pI);
+  } else {
+    camera.lookAt(pI);
+  }
+
+  camera.up.set(0,1,0);
+  camera.updateMatrixWorld();
+  camera.updateProjectionMatrix();
+}
+
+function stopPinEarth() {
+  if (!_earthPin) return;
+
+  // restaurar escala Tierra
+  if (_earthPin.earthMesh?.userData?.__origScale) {
+    _earthPin.earthMesh.scale.copy(_earthPin.earthMesh.userData.__origScale);
+    delete _earthPin.earthMesh.userData.__origScale;
+  }
+
+  // restaurar órbitas
+  if (_earthPin.orbits?.length) {
+    for (const ln of _earthPin.orbits) {
+      if (ln?.material) {
+        const mat = ln.material;
+        const op = typeof mat.userData?.__origOpacity === 'number' ? mat.userData.__origOpacity : 0.25;
+        mat.opacity = op;
+        ln.visible = true;
+      }
+    }
+  }
+
+  // desbloquear controles
+  if (_earthPin.controls && _earthPin.lockControls) _earthPin.controls.enabled = true;
+
+  _earthPin = null;
+}
+
 
 // --- encuadre: target = punto medio Tierra-Impactor; Tierra en bottom-left, Impactor en primer plano ---
 function zoomComposeMidpointAndCorner(impactorMesh, earthMesh, camera, controls, opts = {}) {
@@ -347,6 +467,7 @@ function resetIsolation(listRef) {
 
 //PARA EL PANEL LATERAL DE INFO
 onPanelReset(() => {
+  stopPinEarth();
   resetIsolation();
   restoreEarthScale(earthItem?.mesh || null);
   restoreDefaultView({ smooth: true, duration: 1000 });
@@ -385,7 +506,14 @@ function iniciarSimulacion(mountEl) {
   if (earthData) {
     try {
       const geomE = new THREE.SphereGeometry(0.09, 64, 64);
-      const matE = new THREE.MeshBasicMaterial({ map: earthTex });
+      const matE = new THREE.MeshPhongMaterial({
+        map: earthTex,
+        flatShading: false,
+        shininess: 8,
+        specular: 0x222222,
+        emissive: 0x0a0f1a,
+        emissiveIntensity: 0.22
+      });
       const meshE = new THREE.Mesh(geomE, matE);
       meshE.name = earthData.name || 'Earth';
 
@@ -458,17 +586,28 @@ function iniciarSimulacion(mountEl) {
     } catch {}
 
     const openPanelHandler = () => {
-    isolateKeep([impactorItem, earthItem], asteroidMeshes);
-    freezeSystem();
-    zoomComposeMidpointAndCorner(
-      impactorItem.mesh,
-      earthItem?.mesh || null,
-      camera,
-      controls,
-      { distance: 0.6, lateral: 0.4, vertical: 0.2, earthScale: 1.6, duration: 1400 }
-    );
-    showPanelFor(impactorItem);
-  };
+      isolateKeep([impactorItem, earthItem], asteroidMeshes);
+      freezeSystem();
+
+      // ACTIVAR PIN: Tierra fijada a la esquina inf-izq y impactor centrado
+      startPinEarthToCorner({
+        impactorMesh: impactorItem.mesh,
+        earthMesh: earthItem?.mesh,
+        camera,
+        controls,
+        targetNDC: { x: -0.94, y: -0.97 },
+        earthDepthFactor: 0.80,
+        keepCameraDistance: 0.40,
+        earthScale: 2.3,
+        viewOffset: { yawDeg: -14, pitchDeg: 6 },
+        lockControls: true,
+        transitionMs: 900,   // ← transición suave
+        fadeOrbits: true     // ← oculta órbitas con fade
+      });
+
+
+      showPanelFor(impactorItem);
+    };
   if (impactorItem) addListener(window, 'sim:open-panel', openPanelHandler);
 
   const resumeHandler = () => {
@@ -542,6 +681,77 @@ function iniciarSimulacion(mountEl) {
             }
             }
         }
+
+        // --- PIN: recolocar TIERRA en esquina inferior-izquierda respecto al IMPACTOR ---
+        if (_earthPin) {
+          const S = _earthPin;
+          const { impactorMesh, earthMesh, camera, controls } = S;
+          if (impactorMesh?.position && earthMesh?.position) {
+            const now = performance.now();
+            const u = S.dur > 0 ? _easeSmoothstep(Math.min(1, (now - S.t0) / S.dur)) : 1;
+
+            // ---- 1) fade de órbitas ----
+            if (S.orbits?.length) {
+              for (const ln of S.orbits) {
+                if (!ln?.material) continue;
+                const mat = ln.material;
+                const orig = typeof mat.userData?.__origOpacity === 'number' ? mat.userData.__origOpacity : (mat.opacity ?? 1);
+                mat.opacity = (1 - u) * orig; // fade out
+                if (u >= 1 && !S.fadedDone) { ln.visible = false; }
+              }
+              if (u >= 1) S.fadedDone = true;
+            }
+
+            // ---- 2) tween de cámara: distancia + yaw/pitch alrededor del impactor ----
+            const pI = impactorMesh.position;
+            if (controls) controls.target.copy(pI);
+
+            // distancia
+            const dist = THREE.MathUtils.lerp(S.startDist, S.targetDist, u);
+
+            // yaw/pitch blending
+            const yaw = THREE.MathUtils.lerp(S.startYaw, S.targetYaw, u);
+            const pitch = THREE.MathUtils.lerp(S.startPitch, S.targetPitch, u);
+
+            // construir dirección desde yaw/pitch (convención: yaw sobre Y+, pitch sobre eje lateral)
+            const baseDir = new THREE.Vector3(0, 0, 1); // mirando +Z desde el impactor
+            const upWorld = new THREE.Vector3(0,1,0);
+            const qYaw = new THREE.Quaternion().setFromAxisAngle(upWorld, yaw);
+            const dirYaw = baseDir.clone().applyQuaternion(qYaw);
+            const side = new THREE.Vector3().crossVectors(upWorld, dirYaw).normalize();
+            const qPitch = new THREE.Quaternion().setFromAxisAngle(side, pitch);
+            const dirFinal = dirYaw.clone().applyQuaternion(qPitch).normalize();
+
+            camera.position.copy(pI.clone().add(dirFinal.multiplyScalar(dist)));
+            camera.up.set(0,1,0);
+            camera.updateMatrixWorld();
+            camera.updateProjectionMatrix();
+
+            // ---- 3) escalar tierra suavemente ----
+            const scaleNow = THREE.MathUtils.lerp(S.startEarthScale, S.earthScale, u);
+            earthMesh.scale.setScalar(scaleNow);
+
+            // ---- 4) fijar TIERRA en esquina (NDC → cámara → mundo) con profundidad “cercana” ----
+            const pI_cam = pI.clone().applyMatrix4(camera.matrixWorldInverse);
+            const impactorDepth = Math.max(1e-4, -pI_cam.z);
+            const depth = Number.isFinite(S.earthDepthFactor)
+              ? Math.max(1e-4, impactorDepth * S.earthDepthFactor)
+              : Math.max(1e-4, impactorDepth + (S.depthOffset ?? 0.2));
+
+            const fovY = (camera.fov ?? 50) * Math.PI/180;
+            const tanY = Math.tan(fovY/2);
+            const tanX = tanY * (camera.aspect || (window.innerWidth / Math.max(1, window.innerHeight)));
+            const desiredX_cam = (S.targetNDC.x) * tanX * depth;
+            const desiredY_cam = (S.targetNDC.y) * tanY * depth;
+            const desiredZ_cam = -depth;
+
+            const desired_cam = new THREE.Vector3(desiredX_cam, desiredY_cam, desiredZ_cam);
+            const desired_world = desired_cam.applyMatrix4(camera.matrixWorld);
+            earthMesh.position.copy(desired_world);
+          }
+        }
+
+
         controls.update();
         renderer.render(scene, camera);
     }
