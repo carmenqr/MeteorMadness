@@ -1213,6 +1213,36 @@ export default function ImpactMMI() {
         </button>
       )}
 
+      {!helpOpen && (
+      <button
+        onClick={() => navigate("/")}
+        title="Back to Menu"
+        aria-label="Back to Menu"
+        style={{
+          position: "absolute",
+          top: 12,
+          right: 60, // separa del botón de ayuda
+          zIndex: 1100,
+          width: 100,
+          height: 36,
+          borderRadius: 8,
+          border: "1px solid rgba(173, 216, 255, 0.35)",
+          background: "rgba(24, 45, 78, 0.85)",
+          color: "#e9f2ff",
+          fontWeight: 600,
+          fontSize: 13,
+          lineHeight: "34px",
+          textAlign: "center",
+          cursor: "pointer",
+          backdropFilter: "blur(6px)",
+          boxShadow: "0 6px 18px rgba(0,0,0,.35)"
+        }}
+      >
+        Back to Menu
+      </button>
+    )}
+
+
       {/* Panel de ayuda: si está abierto, muestra info y × */}
       {helpOpen && (
         <div style={styles.titleBox}>
