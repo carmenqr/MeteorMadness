@@ -378,7 +378,53 @@ function resetModuleState() {
 // ———————————————————————————————————————
 // UI auxiliar
 // ———————————————————————————————————————
+function ensureLabelStyles() {
+  if (document.getElementById('asteroid-label-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'asteroid-label-styles';
+  style.textContent = `
+    .asteroid-label {
+      position: absolute;
+      pointer-events: none;
+      font-family: Inter, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      font-size: 12px;
+      line-height: 1.2;
+      color: #eaeaea;
+      /* sin fondo por defecto */
+      /* Si quieres ligeramente más legible sobre fondos claros, puedes usar solo sombra de texto: */
+      text-shadow: 0 1px 2px rgba(0,0,0,.55);
+      will-change: transform;
+      user-select: none;
+    }
+    .asteroid-label--earth {
+      color: #7fb3ff; /* azul “Tierra” */
+      text-shadow:
+        0 0 6px rgba(43,111,255,.55),
+        0 1px 2px rgba(0,0,0,.6);
+      font-weight: 600;
+    }
+    .asteroid-label--impactor {
+      color: #ffb155; /* naranja impacto */
+      text-shadow: 0 1px 2px rgba(0,0,0,.6);
+      font-weight: 600;
+    }
+    .asteroid-label--minor {
+      color: #dddddd;
+      text-shadow: 0 1px 2px rgba(0,0,0,.5);
+      font-weight: 500;
+    }
+    /* Si en algún momento quieres fondo, añade la clase 'bg' dinámicamente */
+    .asteroid-label.bg {
+      background: rgba(0,0,0,.45);
+      border-radius: 8px;
+      padding: 2px 6px;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 function ensureUI() {
+  ensureLabelStyles();
   if (!document.getElementById('labels')) {
     const labels = registerNode(document.createElement('div'));
     labels.id = 'labels';
@@ -393,21 +439,62 @@ function ensureUI() {
     btn.id = 'btn-start';
     btn.textContent = 'Start simulation';
     Object.assign(btn.style, {
-      position: 'fixed', bottom: '16px', left: '16px', zIndex: 30,
-      padding: '10px 16px', borderRadius: '12px',
-      border: '1px solid #2563eb', background: '#1d4ed8',
-      color: '#fff', cursor: 'pointer', fontSize: '14px', fontWeight: '600',
-      boxShadow: '0 4px 14px rgba(0,0,0,0.35)', letterSpacing: '.3px'
+      position: 'fixed',
+      bottom: '16px',
+      left: '16px',
+      zIndex: 30,
+      padding: '14px 26px',
+      borderRadius: '18px',
+      background: 'linear-gradient(155deg, rgba(28,42,70,0.9), rgba(12,18,30,0.9))',
+      color: '#f1f5f9',
+      border: '1px solid rgba(255,255,255,0.3)',
+      cursor: 'pointer',
+      fontSize: '16px',
+      fontWeight: '600',
+      letterSpacing: '.5px',
+      boxShadow: '0 6px 22px -6px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.08)',
+      backdropFilter: 'blur(7px)',
+      WebkitBackdropFilter: 'blur(7px)',
+      userSelect: 'none',
+      transition: 'border-color .25s, box-shadow .25s, transform .25s, background .4s'
     });
+
+    btn.addEventListener('mouseover', () => {
+      btn.style.borderColor = '#3b82f6';
+      btn.style.boxShadow = '0 8px 26px -4px rgba(0,0,0,0.65), 0 0 0 1px rgba(59,130,246,0.45), inset 0 0 0 1px rgba(255,255,255,0.15)';
+      btn.style.transform = 'translateY(-2px)';
+    });
+    btn.addEventListener('mouseout', () => {
+      btn.style.borderColor = 'rgba(255,255,255,0.3)';
+      btn.style.boxShadow = '0 6px 22px -6px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.08)';
+      btn.style.transform = 'translateY(0)';
+    });
+    btn.addEventListener('mousedown', () => {
+      btn.style.transform = 'translateY(0)';
+      btn.style.boxShadow = '0 4px 16px -4px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.1)';
+    });
+    btn.addEventListener('mouseup', () => {
+      btn.style.transform = 'translateY(-2px)';
+      btn.style.boxShadow = '0 8px 26px -4px rgba(0,0,0,0.65), 0 0 0 1px rgba(59,130,246,0.45), inset 0 0 0 1px rgba(255,255,255,0.15)';
+    });
+    btn.addEventListener('focus', () => {
+      btn.style.outline = 'none';
+      btn.style.boxShadow = '0 0 0 2px rgba(59,130,246,0.55), 0 6px 22px -6px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.1)';
+    });
+    btn.addEventListener('blur', () => {
+      btn.style.boxShadow = '0 6px 22px -6px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.08)';
+    });
+
     btn.addEventListener('click', () => {
       simulationPaused = true;
       window.dispatchEvent(new CustomEvent('sim:pause-orbits'));
       window.dispatchEvent(new CustomEvent('sim:open-panel'));
       btn.style.display = 'none';
     });
+
     document.body.appendChild(registerNode(btn));
 
-    // Re-aparecer botón al reset si no hay panel abierto
+    // Reaparecer botón al reset
     window.addEventListener('sim:resume-orbits', () => {
       const b = document.getElementById('btn-start');
       if (b) b.style.display = 'block';
@@ -419,18 +506,32 @@ function ensureUI() {
     const wrap = registerNode(document.createElement('div'));
     Object.assign(wrap.style, {
       position: 'fixed', top: '12px', right: '12px', zIndex: 30,
-      display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
       pointerEvents: 'auto', fontFamily: 'system-ui, sans-serif'
     });
-    const labelSel = document.createElement('label');
-    labelSel.textContent = 'Asteroids:';
-    Object.assign(labelSel.style, { fontSize: '11px', fontWeight: '600', color: '#fff', textShadow:'0 1px 2px #000' });
+    const labelSel = document.createElement('div');
+    labelSel.textContent = 'Astral Bodies';
+    Object.assign(labelSel.style, {
+      fontSize: '24px', fontWeight: '800', color: '#f2f6ff', letterSpacing: '1px',
+      textShadow:'0 4px 10px rgba(0,0,0,0.7), 0 0 6px rgba(120,170,255,0.35)',
+      background:'linear-gradient(145deg, rgba(10,18,35,0.55), rgba(30,50,90,0.55))',
+      padding:'10px 26px', borderRadius:'32px',
+      border:'1px solid rgba(255,255,255,0.25)', backdropFilter:'blur(6px)',
+      boxShadow:'0 8px 28px -10px rgba(0,0,0,0.75), inset 0 0 0 1px rgba(255,255,255,0.06)',
+      textTransform:'uppercase'
+    });
     const sel = document.createElement('select');
     sel.id = 'asteroid-select';
     Object.assign(sel.style, {
-      padding: '6px 8px', borderRadius: '8px', background: 'rgba(0,0,0,0.55)', color: '#fff',
-      border: '1px solid #ffffff33', cursor: 'pointer', fontSize: '12px'
+      padding: '14px 22px', borderRadius: '18px', background: 'linear-gradient(155deg, rgba(28,42,70,0.9), rgba(12,18,30,0.9))', color: '#f1f5f9',
+      border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer', fontSize: '16px', fontWeight:'500',
+      boxShadow:'0 6px 22px -6px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.08)',
+      backdropFilter:'blur(7px)', minWidth:'240px', appearance:'none', WebkitAppearance:'none'
     });
+    sel.addEventListener('mouseover', () => sel.style.borderColor = '#3b82f6');
+    sel.addEventListener('mouseout', () => sel.style.borderColor = 'rgba(255,255,255,0.25)');
+    sel.addEventListener('focus', () => { sel.style.outline='none'; sel.style.boxShadow='0 0 0 2px rgba(59,130,246,0.55)'; });
+    sel.addEventListener('blur', () => { sel.style.boxShadow='0 4px 18px -4px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.07)'; });
     sel.innerHTML = '<option value="__loading" disabled selected>Loading…</option>';
 
     sel.addEventListener('change', (e) => {
@@ -467,6 +568,7 @@ function isolate(item, list) {
     const sel = it === item;
 
     if (it.mesh) it.mesh.visible = sel;
+
     if (it.pathLine) {
       it.pathLine.visible = sel;
       if (it.pathLine.material) {
@@ -474,7 +576,9 @@ function isolate(item, list) {
         it.pathLine.material.opacity = sel ? 1.0 : 0.25;
       }
     }
-    if (it.labelEl) it.labelEl.style.display = sel ? 'block' : 'none';
+
+    // === política de labels ===
+    setLabelMode(it, sel ? 'auto' : 'hide');
   }
   showPanelFor(item);
 }
@@ -486,6 +590,7 @@ function isolateKeep(keepItems, list) {
     const keep = keepSet.has(it);
 
     if (it.mesh) it.mesh.visible = keep;
+
     if (it.pathLine) {
       it.pathLine.visible = keep;
       if (it.pathLine.material) {
@@ -493,8 +598,9 @@ function isolateKeep(keepItems, list) {
         it.pathLine.material.opacity = keep ? (keepItems.length === 1 ? 1.0 : 0.9) : 0.25;
       }
     }
-    // Mostrar labels solo de los kept
-    if (it.labelEl) it.labelEl.style.display = keep ? 'block' : 'none';
+
+    // === política de labels ===
+    setLabelMode(it, keep ? 'auto' : 'hide');
   }
 }
 
@@ -503,21 +609,23 @@ function resetIsolation(listRef) {
   isolatedItem = null;
   for (const it of list) {
     if (it.mesh) it.mesh.visible = true;
+
     if (it.pathLine) {
       it.pathLine.visible = true;
       if (it.pathLine.material) {
         it.pathLine.material.transparent = true;
         if (it === earthItem) {
-          it.pathLine.material.opacity = 0.6;          // Tierra
+          it.pathLine.material.opacity = 0.6;
         } else if (/impactor[- ]?2025/i.test(it.mesh.name || '')) {
-          it.pathLine.material.opacity = 0.4;          // Impactor
+          it.pathLine.material.opacity = 0.4;
         } else {
-          it.pathLine.material.opacity = 0.25;         // Otros
+          it.pathLine.material.opacity = 0.25;
         }
       }
     }
-    // Mostrar de nuevo TODOS los labels tras reset
-    if (it.labelEl) it.labelEl.style.display = 'block';
+
+    // === política de labels ===
+    setLabelMode(it, 'auto');
   }
   hidePanel();
 }
@@ -547,6 +655,16 @@ function registerPanelResetHandler() {
 // ———————————————————————————————————————
 // Simulación
 // ———————————————————————————————————————
+function setLabelMode(item, mode = 'auto') {
+  item._labelMode = mode; // 'auto' | 'hide'
+  if (item.labelEl && mode === 'hide') {
+    item.labelEl.style.display = 'none';
+  }
+}
+function getLabelMode(item) {
+  return item?._labelMode || 'auto';
+}
+
 function iniciarSimulacion(mountEl) {
   ensureUI();
   initInfoPanel();
@@ -596,19 +714,17 @@ function iniciarSimulacion(mountEl) {
       scene.add(pathLineE, meshE);
 
       const labelE = document.createElement('div');
-      labelE.className = 'asteroid-label';
+      labelE.className = 'asteroid-label asteroid-label--earth';
       labelE.textContent = meshE.name;
       labelE.style.display = 'block';
-      Object.assign(labelE.style, {
-        position:'absolute', transform:'translate(-50%,-100%)', padding:'2px 6px',
-        background:'rgba(0,0,0,0.6)', color:'#fff', borderRadius:'8px',
-        font:'12px system-ui', whiteSpace:'nowrap', pointerEvents:'none'
-      });
+      labelE.style.transform = 'translate(-50%, -100%)'; // solo ancla, el resto via CSS
+      labelE.classList.add('outline');
       labelLayer.appendChild(labelE);
 
       asteroidMeshes.push(earthItem = {
         mesh: meshE, obj: earthData, pathLine: pathLineE, pathGeom: pathGeomE, labelEl: labelE
       });
+      setLabelMode(earthItem, 'auto');
     } catch(e){ console.warn('Earth fail', e); }
   }
 
@@ -630,17 +746,17 @@ function iniciarSimulacion(mountEl) {
     scene.add(pathLine, mesh);
 
     const label = document.createElement('div');
-    label.className = 'asteroid-label';
+    const isImpactor = /impactor[- ]?2025/i.test(mesh.name);
+    label.className = 'asteroid-label ' + (isImpactor ? 'asteroid-label--impactor' : 'asteroid-label--minor');
     label.textContent = mesh.name;
     label.style.display = 'block';
-    Object.assign(label.style, {
-      position:'absolute', transform:'translate(-50%,-100%)', padding:'2px 6px',
-      background:'rgba(0,0,0,0.6)', color:'#fff', borderRadius:'8px',
-      font:'12px system-ui', whiteSpace:'nowrap', pointerEvents:'none'
-    });
+    label.style.transform = 'translate(-50%, -100%)';
+    label.classList.add('outline');
     labelLayer.appendChild(label);
 
-    asteroidMeshes.push({ mesh, obj, pathLine, pathGeom, labelEl: label });
+    const item = { mesh, obj, pathLine, pathGeom, labelEl: label };
+    asteroidMeshes.push(item);
+    setLabelMode(item, 'auto');
   }
 
   // Rellenar dropdown ahora que tenemos asteroidMeshes
@@ -696,7 +812,6 @@ function iniciarSimulacion(mountEl) {
         transitionMs: 900,   // ← transición suave
         fadeOrbits: true     // ← oculta órbitas con fade
       });
-
 
       showPanelFor(impactorItem);
     };
@@ -759,21 +874,28 @@ function iniciarSimulacion(mountEl) {
         const tJulian = baseJulian + simDays;
 
         for (const item of asteroidMeshes) {
-            if (!simulationPaused && !tabHidden) {
+          if (!simulationPaused && !tabHidden) {
             const { pos } = propagate(item.obj, tJulian);
             item.mesh.position.copy(pos);
-            }
-            if (item.labelEl && item.labelEl.style.display === 'block') {
-            const sp = item.mesh.position.clone().project(camera);
-            if (sp.z < 1) {
-                const x = (sp.x*0.5+0.5)*window.innerWidth;
-                const y = (-sp.y*0.5+0.5)*window.innerHeight;
-                item.labelEl.style.left = `${x}px`;
-                item.labelEl.style.top  = `${y}px`;
+          }
+          if (item.labelEl) {
+            const mode = getLabelMode(item);           // 'auto' o 'hide'
+            if (mode === 'hide') {
+              item.labelEl.style.display = 'none';     // nunca mostrar si está forzado a oculto
             } else {
+              // modo 'auto': culling normal por pantalla
+              const sp = item.mesh.position.clone().project(camera);
+              const onScreen = (sp.z < 1) && (sp.x > -1.1 && sp.x < 1.1) && (sp.y > -1.1 && sp.y < 1.1);
+              if (onScreen) {
+                const x = (sp.x * 0.5 + 0.5) * window.innerWidth;
+                const y = (-sp.y * 0.5 + 0.5) * window.innerHeight;
+                item.labelEl.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
+                item.labelEl.style.display = 'block';
+              } else {
                 item.labelEl.style.display = 'none';
+              }
             }
-            }
+          }
         }
 
         // --- PIN: recolocar TIERRA en esquina inferior-izquierda respecto al IMPACTOR ---
