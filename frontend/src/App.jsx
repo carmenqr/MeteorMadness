@@ -1,4 +1,3 @@
-// App.jsx
 import { Suspense, lazy } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import Mascot from './components/Mascot'

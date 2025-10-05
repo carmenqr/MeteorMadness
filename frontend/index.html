@@ -13,13 +13,11 @@
       (function () {
         try {
           const nav = performance.getEntriesByType('navigation')[0];
-          const isReload = nav && nav.type === 'reload'; // estándar moderno
           // const isReload = performance.navigation.type === 1; // (deprecated, fallback)
           if (isReload && location.pathname !== '/') {
-            location.replace('/'); // no añade al historial
           }
         } catch (e) {
-          // ignora errores
+          console.error(e);
         }
       })();
     </script>

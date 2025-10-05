@@ -1,4 +1,3 @@
-// src/pages/HomePage.jsx
 import { useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { mascotSay } from "../utils/mascotBus";

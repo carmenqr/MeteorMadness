@@ -14,36 +14,34 @@ const _domNodes = new Set();
 const _listeners = [];
 
 let asteroides = [];
-let simulationPaused = false;     // pausa/continúa la propagación
-let isolatedItem = null;          // asteroide aislado (o null)
-let earthData = null;      // elementos orbitales de la Tierra (del backend)
-let earthItem = null;      // referencia a su mesh/órbita/label
+let simulationPaused = false;
+let isolatedItem = null;
+let earthData = null;
+let earthItem = null;
 
-let tweenCancel = null;   // para abortar un zoom en curso
+let tweenCancel = null;
 
-// Tiempo de simulación independiente del tab
-let baseJulian = 2461000.5;  // tu misma época base
-let simDays = 0;             // días acumulados de la sim
+let baseJulian = 2461000.5;
+let simDays = 0;
 let lastFrameMs = performance.now();
 let tabHidden = false;
 
-let defaultView = { pos: null, target: null }; // vista “global” inicial
-let savedView = null;                           // vista temporal cuando abrimos el panel
+let defaultView = { pos: null, target: null };
+let savedView = null;
 
-const TIME_SCALE = 1; // días/segundo de simulación
+const TIME_SCALE = 1;
 
 let _running = false;
 let _frameId = null;
-let _sceneRefs = null;         // guardamos {scene,camera,renderer,controls}
+let _sceneRefs = null;
 let _visibilityHandler = null;
 let _resizeHandler = null;
 
-let _earthPin = null; // { impactorMesh, earthMesh, camera, controls, targetNDC, depthOffset, lockControls }
-let hoverItem = null; // ahora en ámbito de módulo (accesible desde isolate)
+let _earthPin = null;
+let hoverItem = null;
 
 function applyHover(item) {
   if (!item?.pathLine?.material) return;
-  // Si hay un aislado y no es éste, no elevamos
   if (isolatedItem && item !== isolatedItem) return;
   item.pathLine.material.opacity = 1.0;
 }
@@ -66,16 +64,14 @@ function freezeSystem() {
 
 function resumeSystem() {
   simulationPaused = false;
-  // si hay un tween de cámara en curso, lo cancelamos
   if (typeof tweenCancel === 'function') { tweenCancel(); tweenCancel = null; }
   window.dispatchEvent(new CustomEvent('sim:resume-orbits'));
 }
 
-// Tween sencillo de cámara (suave)
 function tweenCamera({camera, controls, fromPos, toPos, fromTarget, toTarget, duration = 900, onDone}) {
   let raf, stop = false;
   const t0 = performance.now();
-  const ease = x => (x<0?0:x>1?1:x*x*(3-2*x)); // smoothstep
+  const ease = x => (x<0?0:x>1?1:x*x*(3-2*x));
   function step(now){
     if (stop) return;
     const u = ease((now - t0)/duration);
@@ -89,48 +85,39 @@ function tweenCamera({camera, controls, fromPos, toPos, fromTarget, toTarget, du
   return ()=>{ stop = true; cancelAnimationFrame(raf); };
 }
 
-// Fija la Tierra en una esquina de la pantalla (NDC) respecto al IMPACTOR (centro)
 function startPinEarthToCorner({
   impactorMesh, earthMesh, camera, controls,
   targetNDC = { x: -0.94, y: -0.97 },
-  earthDepthFactor = 0.80,     // <1 → Tierra más cerca que el impactor (se ve mayor)
-  depthOffset = null,          // se ignora si hay factor
-  keepCameraDistance = 0.40,   // zoom objetivo
-  earthScale = 2.3,            // tamaño objetivo
-  viewOffset = { yawDeg: -14, pitchDeg: 6 }, // giro objetivo
+  earthDepthFactor = 0.80,
+  depthOffset = null,
+  keepCameraDistance = 0.40,
+  earthScale = 2.3,
+  viewOffset = { yawDeg: -14, pitchDeg: 6 },
   lockControls = true,
-  transitionMs = 900,          // ← duración transición suave
-  fadeOrbits = true            // ← difuminar órbitas durante el zoom
+  transitionMs = 900,
+  fadeOrbits = true
 } = {}) {
   if (!impactorMesh || !earthMesh || !camera) return;
 
-  // escala original Tierra
   if (!earthMesh.userData.__origScale) {
     earthMesh.userData.__origScale = earthMesh.scale.clone();
   }
-  const startEarthScale = earthMesh.scale.x; // asumimos uniform
-
-  // estado inicial para tween de cámara (distancia + yaw/pitch alrededor del impactor)
+  const startEarthScale = earthMesh.scale.x;
   const pI = impactorMesh.position.clone();
   const vCam = camera.position.clone().sub(pI);
   let startDist = vCam.length(); if (startDist < 1e-6) startDist = keepCameraDistance;
   const dir = vCam.length() > 1e-6 ? vCam.clone().normalize() : new THREE.Vector3(0,0,1);
 
-  // yaw (alrededor de Y mundial) y pitch (alrededor de eje lateral)
   const upWorld = new THREE.Vector3(0,1,0);
-  // Proyección horizontal para yaw
   const horiz = dir.clone(); horiz.y = 0; if (horiz.lengthSq()<1e-8) horiz.set(0,0,1); horiz.normalize();
-  let startYaw = Math.atan2(horiz.x, horiz.z);                 // [-π, π], z adelante
+  let startYaw = Math.atan2(horiz.x, horiz.z);
   const sideAxis = new THREE.Vector3().crossVectors(upWorld, horiz).normalize();
-  // ángulo entre horiz y dir sobre sideAxis (pitch positivo = mirar hacia abajo un poco)
   const dot = THREE.MathUtils.clamp(dir.dot(horiz), -1, 1);
   let startPitch = Math.acos(dot); if (dir.y > 0) startPitch = -startPitch;
 
-  // destino
   const targetYaw = (viewOffset?.yawDeg ?? 0) * Math.PI / 180;
   const targetPitch = (viewOffset?.pitchDeg ?? 0) * Math.PI / 180;
 
-  // preparar fade de órbitas
   const orbits = [];
   if (fadeOrbits) {
     const list = window.__asteroidMeshes || [];
@@ -152,20 +139,15 @@ function startPinEarthToCorner({
     targetNDC, earthDepthFactor, depthOffset,
     keepCameraDistance, earthScale, viewOffset,
     lockControls,
-
-    // transición
     t0: performance.now(),
     dur: Math.max(0, transitionMs|0),
     startDist, targetDist: keepCameraDistance,
     startYaw, targetYaw,
     startPitch, targetPitch,
     startEarthScale,
-
-    // órbitas
     orbits, fadedDone: false
   };
 
-  // fijar target al impactor y bloquear controles si procede
   if (controls) {
     if (lockControls) controls.enabled = false;
     controls.target.copy(pI);
@@ -181,13 +163,11 @@ function startPinEarthToCorner({
 function stopPinEarth() {
   if (!_earthPin) return;
 
-  // restaurar escala Tierra
   if (_earthPin.earthMesh?.userData?.__origScale) {
     _earthPin.earthMesh.scale.copy(_earthPin.earthMesh.userData.__origScale);
     delete _earthPin.earthMesh.userData.__origScale;
   }
 
-  // restaurar órbitas
   if (_earthPin.orbits?.length) {
     for (const ln of _earthPin.orbits) {
       if (ln?.material) {
@@ -199,64 +179,11 @@ function stopPinEarth() {
     }
   }
 
-  // desbloquear controles
   if (_earthPin.controls && _earthPin.lockControls) _earthPin.controls.enabled = true;
 
   _earthPin = null;
 }
 
-
-// --- encuadre: target = punto medio Tierra-Impactor; Tierra en bottom-left, Impactor en primer plano ---
-function zoomComposeMidpointAndCorner(impactorMesh, earthMesh, camera, controls, opts = {}) {
-  const dur      = opts.duration ?? 1000;
-  const distance = opts.distance ?? 2.0;     // distancia de la cámara desde el punto medio
-  const lateral  = opts.lateral  ?? 0.65;    // compensa horizontal para empujar Tierra a la izquierda
-  const vertical = opts.vertical ?? 0.45;    // compensa vertical para empujar Tierra abajo
-  const earthScale = opts.earthScale ?? 1.6; // escala temporal para ver Tierra “grande”
-
-  if (!impactorMesh) return;
-  const earthMeshOrNull = earthMesh || null;
-
-  // 1) punto medio entre Tierra e Impactor (si no hay Tierra, aproxima)
-  const pI = impactorMesh.position.clone();
-  const pE = earthMeshOrNull ? earthMeshOrNull.position.clone()
-                             : pI.clone().add(new THREE.Vector3(0.7,0.5,0.6));
-  const mid = pI.clone().add(pE).multiplyScalar(0.5);
-
-  // 2) ejes de composición
-  const v = pI.clone().sub(mid).normalize(); // mirar hacia el Impactor
-  const up = new THREE.Vector3(0,1,0);
-  let side = new THREE.Vector3().crossVectors(v, up); // horizontal
-  if (side.lengthSq() < 1e-6) side.set(1,0,0);
-  side.normalize();
-  let vert = new THREE.Vector3().crossVectors(side, v).normalize(); // vertical
-
-  // Empuja la cámara para que la Tierra quede bottom-left en el encuadre
-  const camOffset = v.clone().multiplyScalar(-distance)
-    .add(side.multiplyScalar(+lateral))
-    .add(vert.multiplyScalar(+vertical));
-
-  const fromPos    = camera.position.clone();
-  const toPos      = mid.clone().add(camOffset);
-  const fromTarget = controls ? controls.target.clone() : new THREE.Vector3();
-  const toTarget   = mid.clone();
-
-  // 3) escala temporal de la Tierra
-  if (earthMeshOrNull) {
-    if (!earthMeshOrNull.userData.__origScale) {
-      earthMeshOrNull.userData.__origScale = earthMeshOrNull.scale.clone();
-    }
-    earthMeshOrNull.scale.setScalar(earthScale);
-  }
-
-  if (controls) controls.enabled = false;
-  tweenCancel = tweenCamera({
-    camera, controls, fromPos, toPos, fromTarget, toTarget, duration: dur,
-    onDone: ()=>{ if (controls) controls.enabled = true; }
-  });
-}
-
-// Restaurar escala original de la Tierra (llámalo al cerrar panel)
 function restoreEarthScale(earthMesh){
   if (earthMesh && earthMesh.userData?.__origScale) {
     earthMesh.scale.copy(earthMesh.userData.__origScale);
@@ -277,11 +204,10 @@ function restoreDefaultView({ smooth = false, duration = 700 } = {}) {
     if (ctr) ctr.target.copy(toTarget);
     cam.position.copy(toPos);
     cam.updateProjectionMatrix();
-    savedView = null; // limpia vista temporal
+    savedView = null;
     return;
   }
 
-  // Suave (tween casero)
   const fromPos = cam.position.clone();
   const fromTarget = (ctr ? ctr.target.clone() : new THREE.Vector3());
   const t0 = performance.now();
@@ -298,51 +224,34 @@ function restoreDefaultView({ smooth = false, duration = 700 } = {}) {
   requestAnimationFrame(step);
 }
 
-
-// Evita actualizar cuando no se ve
-function isRenderable(item, camera) {
-  if (!item.mesh.visible) return false;
-  const sp = item.mesh.position.clone().project(camera);
-  // dentro del clip-space y delante de la cámara (márgenes holgados)
-  return sp.z < 1 && sp.x > -1.2 && sp.x < 1.2 && sp.y > -1.2 && sp.y < 1.2;
-}
-
-// ———————————————————————————————————————
-// Cargar datos del backend
-// ———————————————————————————————————————
 async function cargarAsteroides() {
   try {
     const res = await fetch("http://127.0.0.1:5000/api/asteroides");
     if (!res.ok) throw new Error(`API responded ${res.status}`);
-    // API returns {count, items} when using NASA browse endpoint, or a raw array from mock
     const data = await res.json();
     asteroides = Array.isArray(data) ? data : (data.items || []);
     console.log(`Loaded ${asteroides.length} asteroids from backend`);
 
-    // ——— AÑADIR IMPACTOR2025 CON ÓRBITA PROPIA ———
     const yaExisteImpactor = asteroides.some(a => /impactor[- ]?2025/i.test(a.name));
     if (!yaExisteImpactor) {
       const impactor2025 = {
         name: "Impactor2025",
-        // Elementos keplerianos (mismas CLAVES que tus asteroides reales)
-        a: 1.20,     // UA (distinto para no superponer)
-        e: 0.15,     // excentricidad moderada
-        i: 25.0,     // grados (inclinación)
-        om: 80.0,    // Ω: nodo ascendente (grados)
-        w: 45.0,     // ω: argumento del perihelio (grados)
-        M0: 0.0,     // anomalía media en epoch (grados)
-        epoch: 2461000.5 // misma época de referencia que usas
+        a: 1.20,
+        e: 0.15,
+        i: 25.0,
+        om: 80.0,
+        w: 45.0,
+        M0: 0.0,
+        epoch: 2461000.5
       };
       asteroides.push(impactor2025);
       console.log("Añadido Impactor2025 con órbita propia:", impactor2025);
     }
 
-    // === AÑADIR: Cargar Earth desde el backend ===
     try {
       const resEarth = await fetch("http://127.0.0.1:5000/api/earth");
       if (resEarth.ok) {
         const d = await resEarth.json();
-        // Esperamos mismas claves: { name, a, e, i, om, w, M0, epoch }
         earthData = Array.isArray(d) ? d[0] : d;
         if (!earthData?.name) earthData.name = "Earth";
         console.log("Earth loaded:", earthData);
@@ -363,13 +272,11 @@ async function cargarAsteroides() {
 
     } catch (err2) {
       console.error('Fallo al cargar mock local:', err2);
-      // Mostrar mensaje visible al usuario
       const info = document.getElementById('info-panel') || document.createElement('div');
       info.id = 'info-panel';
       Object.assign(info.style, {position: 'fixed', top: '12px', left: '12px', padding: '12px', background: 'rgba(0,0,0,0.85)', color: '#fff', zIndex: 50});
       info.innerText = 'No se han podido cargar datos de los asteroides. Inicia el backend o comprueba la ruta de los archivos.';
       document.body.appendChild(info);
-      // también dejamos un log en consola
       console.error('No se pudieron cargar asteroides desde backend ni desde mock local.');
     }
   }
@@ -397,9 +304,6 @@ function resetModuleState() {
   defaultView = { pos: null, target: null };
 }
 
-// ———————————————————————————————————————
-// UI auxiliar
-// ———————————————————————————————————————
 function ensureLabelStyles() {
   if (document.getElementById('asteroid-label-styles')) return;
   const style = document.createElement('style');
@@ -412,21 +316,19 @@ function ensureLabelStyles() {
       font-size: 12px;
       line-height: 1.2;
       color: #eaeaea;
-      /* sin fondo por defecto */
-      /* Si quieres ligeramente más legible sobre fondos claros, puedes usar solo sombra de texto: */
       text-shadow: 0 1px 2px rgba(0,0,0,.55);
       will-change: transform;
       user-select: none;
     }
     .asteroid-label--earth {
-      color: #7fb3ff; /* azul “Tierra” */
+      color: #7fb3ff;
       text-shadow:
         0 0 6px rgba(43,111,255,.55),
         0 1px 2px rgba(0,0,0,.6);
       font-weight: 600;
     }
     .asteroid-label--impactor {
-      color: #ffb155; /* naranja impacto */
+      color: #ffb155;
       text-shadow: 0 1px 2px rgba(0,0,0,.6);
       font-weight: 600;
     }
@@ -435,7 +337,6 @@ function ensureLabelStyles() {
       text-shadow: 0 1px 2px rgba(0,0,0,.5);
       font-weight: 500;
     }
-    /* Si en algún momento quieres fondo, añade la clase 'bg' dinámicamente */
     .asteroid-label.bg {
       background: rgba(0,0,0,.45);
       border-radius: 8px;
@@ -504,7 +405,6 @@ function ensureAstralDropdownStyles() {
     .astral-dd__optlabel {
       font-size: 12px; opacity: .75; padding: 8px 10px 4px;
     }
-    /* Scrollbar sutil */
     .astral-dd__panel::-webkit-scrollbar { width: 10px }
     .astral-dd__panel::-webkit-scrollbar-thumb { background: rgba(160,190,240,0.22); border-radius: 10px }
   `;
@@ -598,7 +498,6 @@ function createAstralDropdown({ id = 'astral-dropdown', placeholder = 'All objec
     const found = options.find(o => o.value === v);
     const labelEl = btn.querySelector('.astral-dd__label');
     labelEl.textContent = found?.label ?? placeholder;
-    // marcar selección visual
     panel.querySelectorAll('.astral-dd__option').forEach(n =>
       n.setAttribute('aria-selected', n.getAttribute('data-value') === v ? 'true' : 'false'));
   }
@@ -645,7 +544,6 @@ function ensureUI() {
     });
     document.body.appendChild(labels);
   }
-  // Contenedor botón (bottom-left)
   if (!document.getElementById('btn-start')) {
     const btn = document.createElement('button');
     btn.id = 'btn-start';
@@ -706,14 +604,12 @@ function ensureUI() {
 
     document.body.appendChild(registerNode(btn));
 
-    // Reaparecer botón al reset
     window.addEventListener('sim:resume-orbits', () => {
       const b = document.getElementById('btn-start');
       if (b) b.style.display = 'block';
     });
   }
 
-  // Contenedor dropdown (top-right) — versión custom
   if (!document.getElementById('astral-dropdown')) {
     const wrap = registerNode(document.createElement('div'));
     Object.assign(wrap.style, {
@@ -743,7 +639,6 @@ function ensureUI() {
       placeholder: 'All objects',
       onSelect: handleAstralSelection
     });
-    // guarda referencia global para poder poblar luego
     window.__astralDropdown = dd;
 
     wrap.appendChild(labelSel);
@@ -759,7 +654,6 @@ function getBaseOrbitOpacity(item) {
   return 0.25;
 }
 
-// (Opcional) helper para fijar a base
 function applyBaseOpacity(item) {
   if (item?.pathLine?.material) {
     item.pathLine.material.opacity = getBaseOrbitOpacity(item);
@@ -825,33 +719,24 @@ function resetIsolation(listRef) {
   hidePanel();
 }
 
-//PARA EL PANEL LATERAL DE INFO
-// Registro diferido del handler de reset del panel (se reinsertará en cada iniciarSimulacion)
 let _panelResetUnsub = null;
 function registerPanelResetHandler() {
-  // Si hay uno previo no hace falta; destroyInfoPanel lo borra cuando se desmonta
   if (_panelResetUnsub) return;
   const cb = () => {
-    // Restaurar estado visual/cámara
     stopPinEarth();
     resetIsolation();
     restoreEarthScale(earthItem?.mesh || null);
     restoreDefaultView({ smooth: true, duration: 1000 });
     resumeSystem();
-    // Reaparecer botón start (por si no lo hace el listener global)
     const b = document.getElementById('btn-start');
     if (b) b.style.display = 'block';
   };
   onPanelReset(cb);
-  // Guardamos un pseudo unsub (no expuesto directamente por panel, pero podremos reinicializar tras cleanup poniéndolo a null)
   _panelResetUnsub = () => { _panelResetUnsub = null; };
 }
 
-// ———————————————————————————————————————
-// Simulación
-// ———————————————————————————————————————
 function setLabelMode(item, mode = 'auto') {
-  item._labelMode = mode; // 'auto' | 'hide'
+  item._labelMode = mode;
   if (item.labelEl && mode === 'hide') {
     item.labelEl.style.display = 'none';
   }
@@ -885,7 +770,6 @@ function iniciarSimulacion(mountEl) {
   const maxAniso = renderer.capabilities.getMaxAnisotropy?.() ?? 1;
   const earthTex = texLoader.load(earthUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); });
   const asteroidTex = texLoader.load(asteroidUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); });
-  // Texturas específicas para el impactor según material elegido en el formulario
   const impactorMaterialTextures = {
     ice: texLoader.load(iceUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); }),
     porous_rock: texLoader.load(porousRockUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); }),
@@ -893,7 +777,6 @@ function iniciarSimulacion(mountEl) {
     iron: texLoader.load(ironUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); })
   };
 
-  // Earth
   if (earthData) {
     try {
       const geomE = new THREE.SphereGeometry(0.09, 64, 64);
@@ -919,7 +802,7 @@ function iniciarSimulacion(mountEl) {
       labelE.className = 'asteroid-label asteroid-label--earth';
       labelE.textContent = meshE.name;
       labelE.style.display = 'block';
-      labelE.style.transform = 'translate(-50%, -100%)'; // solo ancla, el resto via CSS
+      labelE.style.transform = 'translate(-50%, -100%)';
       labelE.classList.add('outline');
       labelLayer.appendChild(labelE);
 
@@ -930,7 +813,6 @@ function iniciarSimulacion(mountEl) {
     } catch(e){ console.warn('Earth fail', e); }
   }
 
-  // Asteroides
   for (const obj of asteroides) {
     const geom = new THREE.SphereGeometry(0.03, 32, 32);
     const mat = new THREE.MeshPhongMaterial({
@@ -961,8 +843,6 @@ function iniciarSimulacion(mountEl) {
     setLabelMode(item, 'auto');
   }
 
-  // Rellenar dropdown ahora que tenemos asteroidMeshes
-  // Rellenar dropdown custom
   if (window.__astralDropdown) {
     const items = [...asteroidMeshes].sort((a,b) => (a.mesh.name||'').localeCompare(b.mesh.name||''));
     const options = [
@@ -973,25 +853,20 @@ function iniciarSimulacion(mountEl) {
     window.__astralDropdown.setValue('__all');
   }
 
-
-  // ——— IMPACTOR2025: localizar, destacar y preparar aislamiento + pausa al abrir panel ———
   const impactorItem = asteroidMeshes.find(i => /impactor[- ]?2025/i.test(i.mesh.name));
   if (impactorItem) {
-    // Destacar color del Impactor2025 (opcional)
     try {
       impactorItem.mesh.material.color.set(0xffaa00);
       if (impactorItem.pathLine?.material?.color) {
         impactorItem.pathLine.material.color.set(0xffaa00);
         impactorItem.pathLine.material.transparent = true;
-        impactorItem.pathLine.material.opacity = 0.4; // órbita bien visible al aislar
+        impactorItem.pathLine.material.opacity = 0.4;
       }
     } catch {}
 
     const openPanelHandler = () => {
       isolateKeep([impactorItem, earthItem], asteroidMeshes);
       freezeSystem();
-
-      // ACTIVAR PIN: Tierra fijada a la esquina inf-izq y impactor centrado
       startPinEarthToCorner({
         impactorMesh: impactorItem.mesh,
         earthMesh: earthItem?.mesh,
@@ -1003,68 +878,60 @@ function iniciarSimulacion(mountEl) {
         earthScale: 2.3,
         viewOffset: { yawDeg: -14, pitchDeg: 6 },
         lockControls: true,
-        transitionMs: 900,   // ← transición suave
-        fadeOrbits: true     // ← oculta órbitas con fade
+        transitionMs: 900,
+        fadeOrbits: true
       });
 
       showPanelFor(impactorItem);
     };
-  if (impactorItem) addListener(window, 'sim:open-panel', openPanelHandler);
+    if (impactorItem) addListener(window, 'sim:open-panel', openPanelHandler);
 
-  // === Suscripción a cambios del formulario del IMPACTOR ===
-  // Mapeo densidad -> clave de textura
-  const densityToKey = (d) => {
-    if (d == null) return null;
-    if (d <= 1100) return 'ice';          // ~1000
-    if (d <= 2000) return 'porous_rock';  // ~1500
-    if (d <= 4000) return 'rock';         // ~3000
-    return 'iron';                        // >= 8000 u otros valores altos
-  };
-  // Registrar listener sólo una vez por simulación
-  onImpactorChange?.(({ densityKgM3 }) => {
-    if (!impactorItem || !impactorItem.mesh) return;
-    const key = densityToKey(densityKgM3);
-    if (!key) return;
-    const tex = impactorMaterialTextures[key];
-    if (tex && impactorItem.mesh.material) {
-      impactorItem.mesh.material.map = tex;
-      // Ajustes de color/emissive ligeros según material
-      try {
-        if (key === 'ice') {
-          impactorItem.mesh.material.color.set(0xe0f6ff);
-          impactorItem.mesh.material.emissive.set(0x203040);
-        } else if (key === 'porous_rock') {
-          impactorItem.mesh.material.color.set(0xb9a899);
-          impactorItem.mesh.material.emissive.set(0x302520);
-        } else if (key === 'rock') {
-          impactorItem.mesh.material.color.set(0xaaaaaa);
-          impactorItem.mesh.material.emissive.set(0x202020);
-        } else if (key === 'iron') {
-          impactorItem.mesh.material.color.set(0xc0c6d0);
-          impactorItem.mesh.material.emissive.set(0x303030);
-        }
-      } catch {}
-      impactorItem.mesh.material.needsUpdate = true;
-    }
-  });
+    const densityToKey = (d) => {
+      if (d == null) return null;
+      if (d <= 1100) return 'ice';
+      if (d <= 2000) return 'porous_rock';
+      if (d <= 4000) return 'rock';
+      return 'iron';
+    };
+    onImpactorChange?.(({ densityKgM3 }) => {
+      if (!impactorItem || !impactorItem.mesh) return;
+      const key = densityToKey(densityKgM3);
+      if (!key) return;
+      const tex = impactorMaterialTextures[key];
+      if (tex && impactorItem.mesh.material) {
+        impactorItem.mesh.material.map = tex;
+        try {
+          if (key === 'ice') {
+            impactorItem.mesh.material.color.set(0xe0f6ff);
+            impactorItem.mesh.material.emissive.set(0x203040);
+          } else if (key === 'porous_rock') {
+            impactorItem.mesh.material.color.set(0xb9a899);
+            impactorItem.mesh.material.emissive.set(0x302520);
+          } else if (key === 'rock') {
+            impactorItem.mesh.material.color.set(0xaaaaaa);
+            impactorItem.mesh.material.emissive.set(0x202020);
+          } else if (key === 'iron') {
+            impactorItem.mesh.material.color.set(0xc0c6d0);
+            impactorItem.mesh.material.emissive.set(0x303030);
+          }
+        } catch {}
+        impactorItem.mesh.material.needsUpdate = true;
+      }
+    });
 
-  const resumeHandler = () => {
-    simulationPaused = false;
-    resetIsolation();
-    restoreEarthScale(earthItem?.mesh || null);
-    restoreDefaultView({ smooth: true, duration: 1000 });
-  };
-  addListener(window, 'sim:resume-orbits', resumeHandler);
-
+    const resumeHandler = () => {
+      simulationPaused = false;
+      resetIsolation();
+      restoreEarthScale(earthItem?.mesh || null);
+      restoreDefaultView({ smooth: true, duration: 1000 });
+    };
+    addListener(window, 'sim:resume-orbits', resumeHandler);
   }
 
-
-  // Raycaster click (aislar o abrir panel de simulación si es Impactor2025)
   const raycaster = new THREE.Raycaster();
   const mouse = new THREE.Vector2();
   const el = renderer.domElement;
 
-  // Raycaster Hover
   const pointer = new THREE.Vector2();
   const hoverRaycaster = new THREE.Raycaster();
 
@@ -1081,7 +948,6 @@ function iniciarSimulacion(mountEl) {
     const item = asteroidMeshes.find(i => i.mesh === hit.object);
     if (!item) return;
 
-    // Impactor2025 => mismo flujo que botón iniciar simulación
     if (/impactor[- ]?2025/i.test(item.mesh.name)) {
       simulationPaused = true;
       window.dispatchEvent(new CustomEvent('sim:pause-orbits'));
@@ -1091,14 +957,10 @@ function iniciarSimulacion(mountEl) {
       return;
     }
 
-    // Asteroide normal: aislar + info
     isolate(item, asteroidMeshes);
   });
 
   addListener(el, 'pointermove', (e) => {
-    // Si hay uno aislado, no hacemos hover sobre otros (el aislado ya está a 1.0)
-    //if (isolatedItem) return;
-
     const rect = el.getBoundingClientRect();
     pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -1130,8 +992,7 @@ function iniciarSimulacion(mountEl) {
       hoverItem = null;
     }
   });
-  
-  // Reemplaza la función animate completa por:
+
   let lastFrameMsLocal = performance.now();
   function animate() {
       _frameId = requestAnimationFrame(animate);
@@ -1150,11 +1011,10 @@ function iniciarSimulacion(mountEl) {
           item.mesh.position.copy(pos);
         }
         if (item.labelEl) {
-          const mode = getLabelMode(item);           // 'auto' o 'hide'
+          const mode = getLabelMode(item);
           if (mode === 'hide') {
-            item.labelEl.style.display = 'none';     // nunca mostrar si está forzado a oculto
+            item.labelEl.style.display = 'none';
           } else {
-            // modo 'auto': culling normal por pantalla
             const sp = item.mesh.position.clone().project(camera);
             const onScreen = (sp.z < 1) && (sp.x > -1.1 && sp.x < 1.1) && (sp.y > -1.1 && sp.y < 1.1);
             if (onScreen) {
@@ -1169,7 +1029,6 @@ function iniciarSimulacion(mountEl) {
         }
       }
 
-      // --- PIN: recolocar TIERRA en esquina inferior-izquierda respecto al IMPACTOR ---
       if (_earthPin) {
         const S = _earthPin;
         const { impactorMesh, earthMesh, camera, controls } = S;
@@ -1177,31 +1036,26 @@ function iniciarSimulacion(mountEl) {
           const now = performance.now();
           const u = S.dur > 0 ? _easeSmoothstep(Math.min(1, (now - S.t0) / S.dur)) : 1;
 
-          // ---- 1) fade de órbitas ----
           if (S.orbits?.length) {
             for (const ln of S.orbits) {
               if (!ln?.material) continue;
               const mat = ln.material;
               const orig = typeof mat.userData?.__origOpacity === 'number' ? mat.userData.__origOpacity : (mat.opacity ?? 1);
-              mat.opacity = (1 - u) * orig; // fade out
+              mat.opacity = (1 - u) * orig;
               if (u >= 1 && !S.fadedDone) { ln.visible = false; }
             }
             if (u >= 1) S.fadedDone = true;
           }
 
-          // ---- 2) tween de cámara: distancia + yaw/pitch alrededor del impactor ----
           const pI = impactorMesh.position;
           if (controls) controls.target.copy(pI);
 
-          // distancia
           const dist = THREE.MathUtils.lerp(S.startDist, S.targetDist, u);
 
-          // yaw/pitch blending
-          const yaw = THREE.MathUtils.lerp(S.startYaw, S.targetYaw, u);
-          const pitch = THREE.MathUtils.lerp(S.startPitch, S.targetPitch, u);
+            const yaw = THREE.MathUtils.lerp(S.startYaw, S.targetYaw, u);
+            const pitch = THREE.MathUtils.lerp(S.startPitch, S.targetPitch, u);
 
-          // construir dirección desde yaw/pitch (convención: yaw sobre Y+, pitch sobre eje lateral)
-          const baseDir = new THREE.Vector3(0, 0, 1); // mirando +Z desde el impactor
+          const baseDir = new THREE.Vector3(0, 0, 1);
           const upWorld = new THREE.Vector3(0,1,0);
           const qYaw = new THREE.Quaternion().setFromAxisAngle(upWorld, yaw);
           const dirYaw = baseDir.clone().applyQuaternion(qYaw);
@@ -1214,11 +1068,9 @@ function iniciarSimulacion(mountEl) {
           camera.updateMatrixWorld();
           camera.updateProjectionMatrix();
 
-          // ---- 3) escalar tierra suavemente ----
           const scaleNow = THREE.MathUtils.lerp(S.startEarthScale, S.earthScale, u);
           earthMesh.scale.setScalar(scaleNow);
 
-          // ---- 4) fijar TIERRA en esquina (NDC → cámara → mundo) con profundidad “cercana” ----
           const pI_cam = pI.clone().applyMatrix4(camera.matrixWorldInverse);
           const impactorDepth = Math.max(1e-4, -pI_cam.z);
           const depth = Number.isFinite(S.earthDepthFactor)
@@ -1238,13 +1090,11 @@ function iniciarSimulacion(mountEl) {
         }
       }
 
-
       controls.update();
       renderer.render(scene, camera);
     }
     animate();
 
-    // Listeners (guardar para cleanup)
     _resizeHandler = () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
@@ -1264,10 +1114,8 @@ function _internalCleanup(mountEl) {
   if (_frameId) cancelAnimationFrame(_frameId);
   _frameId = null;
 
-  // Listeners
   _listeners.splice(0).forEach(fn => { try { fn(); } catch {} });
 
-  // Nodos DOM creados
   _domNodes.forEach(n => { if (n?.parentNode) n.parentNode.removeChild(n); });
   _domNodes.clear();
 
@@ -1292,28 +1140,23 @@ function _internalCleanup(mountEl) {
   _sceneRefs = null;
   resetModuleState();
   _running = false;
-  // Permitir re-registro del handler de panel en próxima simulación
   _panelResetUnsub = null;
 }
 
-// Export opcional por si quieres forzar un stop manual desde consola
 export function stopHomeSimulation(mountEl) {
   _internalCleanup(mountEl);
 }
 
-// Helper para saber si hay canvas vivo
 function _hasAliveRenderer(mountEl) {
   return !!(_sceneRefs?.renderer && _sceneRefs.renderer.domElement &&
             _sceneRefs.renderer.domElement.parentNode === mountEl);
 }
 
 export async function runHomeSimulation(mountEl) {
-  // Si ya “está corriendo” pero no hay renderer vivo (limpieza parcial), libera y continúa
   if (_running && !_hasAliveRenderer(mountEl)) {
     _internalCleanup(mountEl);
   }
 
-  // Si realmente sigue activo y en el mismo contenedor, no hacer nada
   if (_running && _hasAliveRenderer(mountEl)) {
     return () => _internalCleanup(mountEl);
   }
@@ -1328,23 +1171,5 @@ export async function runHomeSimulation(mountEl) {
     return () => {};
   }
 
-  // Devuelve cleanup
   return () => _internalCleanup(mountEl);
 }
-
-//Ejemplo de función de mandar datos de asteroides al back (por si guardamos cosas en BD)
-/*fetch("http://127.0.0.1:5000/api/send-asteroides", {
-    method: "POST",
-    headers: {
-        "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-        nombre: "433 Eros",
-        posicion: {x: 1.23, y: 4.56, z: 7.89},
-        velocidad: 123.45
-    })
-})
-.then(res => res.json())
-.then(data => console.log("Respuesta del servidor:", data))
-.catch(err => console.error(err));
-*/

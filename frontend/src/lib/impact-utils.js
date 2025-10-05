@@ -1,14 +1,14 @@
-import { getImpactorState } from "./home-panel.js";
+import { getImpactorState } from "../simulation/home-panel.js";
 
 export function calcularImpacto() {
   const { massKg, speedKms, densityKgM3 } = getImpactorState();
 
   if (massKg == null || speedKms == null || densityKgM3 == null) {
-    return null; // faltan datos
+    return null;
   }
 
-  const v_mps = speedKms * 1000;                  // convertir a m/s
-  const energiaJ = 0.5 * massKg * v_mps ** 2;     // energía cinética en Julios
+  const v_mps = speedKms * 1000;
+  const energiaJ = 0.5 * massKg * v_mps ** 2;
 
   const result = {
     energiaJ,
@@ -18,7 +18,6 @@ export function calcularImpacto() {
     densidadKgM3: densityKgM3
   };
 
-  // 👇 Imprimir en consola para depurar
   console.log("Impactor parameters:", result);
 
   return result;

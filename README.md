@@ -37,11 +37,29 @@ If Python is **not installed**:
 - 🐍 Go to [python.org/downloads](https://www.python.org/downloads/) and install the latest version.
 - During installation, **check the box** that says *“Add Python to PATH”*.
 - After that, you can verify:
-  ```bash
+```bash
   python --version
+```
 
-  If npm is **not installed**:
-  npm install
+If Git is **not installed**:
+- 🧩 Download and install from [git-scm.com/downloads](/https://git-scm.com/downloads) and install the latest version.
+- **Accept** “Add Git to PATH” during setup.
+- After that, you can verify:
+```bash
+  git --version
+```
+
+If Node is **not installed**:
+- ⚡ Open a new terminal and run the following command to install nvm (version manager):
+```bash
+  nvm install --lts
+```
+- After that, you can verify:
+```bash
+  node --version
+  # You can also check Node Package Manager's version
+  npm --version
+```
 
 ### 1️⃣ Clone the repository
 ```bash
@@ -51,7 +69,7 @@ cd MeteorMadness
 ```
 ### 2️⃣ Set up the Backend (Flask + Python)
 ```bash
-cd back
+cd backend
 ```
 #### Create
 ```bash
@@ -67,6 +85,7 @@ pip install -r requirements.txt
 ```
 #### Configurate APIs
 ```bash
+-- This API_KEY is an example generated in: https://api.nasa.gov/
 export NASA_API_KEY="BrayMFziYdhq2l5OaNMzEnpL46gaVEWEbVjDzOQe"
 ```
 #### Run the Flask App
@@ -76,14 +95,22 @@ python app.py
 
 ### 3️⃣ Set up the Frontend (React + Vite)
 ```bash
-open a new terminal
-cd front
+-- open a new terminal
+cd frontend
+```
+
+### Ensure Node version and istall dependencies
+```bash
+-- Ensure correct Node version
+nvm use
+
+-- Install dependencies
 npm ci
 ```
 #### Start the development server
 ```bash
 npm run dev
-you'll see VITE vX.Y.Z  ready
+-- You'll see VITE vX.Y.Z  ready
 ```
 Now open your browser at http://127.0.0.1:5173/
 

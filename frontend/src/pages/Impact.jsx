@@ -4,10 +4,9 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { mascotSay } from "../utils/mascotBus";
 
-import { calcularImpacto } from "../simulation/impact-utils.js";
+import { calcularImpacto } from "../lib/impact-utils.js";
 
-const ETA_SEISMIC = 0.10; // 10%
-
+const ETA_SEISMIC = 0.10; //10%
 const DRAWER_WIDTH = 360;
 
 const styles = {
@@ -460,7 +459,6 @@ The values here are simplified so you can explore how changing the impact streng
 `.trim()
 };
 
-// --- Helpers for PAGER/losspager ---
 function findContentUrl(contents, patterns) {
   const keys = Object.keys(contents || {});
   for (const pat of patterns) {
@@ -554,13 +552,10 @@ function parseLosses(lossesJson) {
   return { fatalitiesTotal, dollarsTotal, perCountry };
 }
 
-/** ============================
- *  CRÁTER
- *  ============================*/
 function diameterFromMassDensity(massKg, densityKgM3) {
   if (!massKg || !densityKgM3) return null;
   const D = Math.pow((6 * massKg) / (Math.PI * densityKgM3), 1 / 3);
-  return D; // m
+  return D; //m
 }
 function calcCraterFromInputs({
   massKg, densityKgM3, velocidadMps,
@@ -580,9 +575,6 @@ function calcCraterFromInputs({
   return { Dtr, Dfin, Dimp, angleDeg, targetDensity };
 }
 
-/** ============================
- *  FIRE ( 1/R^2)
- *  ============================*/
 function calcFireRingRadius({ energiaJ, fRad = 0.03, Qt_kJ_m2 = 8, attenuation = 1.0 }) {
   if (!energiaJ || energiaJ <= 0) return null;
   const Qt = Qt_kJ_m2 * 1000; // J/m^2
@@ -592,9 +584,6 @@ function calcFireRingRadius({ energiaJ, fRad = 0.03, Qt_kJ_m2 = 8, attenuation =
   return { Rfire_m: R, fRad, Qt_kJ_m2, attenuation };
 }
 
-/** ============================
- *  Shock wave
- *  ============================*/
 const PSI_TO_KPA = 6.89476;
 function peakOverpressure_kPa_from_Z(Z) {
   if (Z <= 0) return Infinity;
@@ -613,18 +602,15 @@ function invertZforPressure_kPa(target_kPa) {
 }
 function calcShockRingRadius({ energiaJ, Pth_kPa = 30 }) {
   if (!energiaJ || energiaJ <= 0) return null;
-  const Wkg = energiaJ / 4.184e6;           // kg TNT equivalentes
+  const Wkg = energiaJ / 4.184e6;
   if (!Number.isFinite(Wkg) || Wkg <= 0) return null;
   const Z = invertZforPressure_kPa(Pth_kPa);
   if (!Z) return null;
-  const R = Z * Math.cbrt(Wkg);             // metros
-  const yield_kt = energiaJ / 4.184e12;     // kilotones TNT
+  const R = Z * Math.cbrt(Wkg);
+  const yield_kt = energiaJ / 4.184e12;
   return { Rshock_m: R, Pth_kPa, yield_kt };
 }
 
-/** ============================
- *  Sismic wave
- *  ============================*/
 function mwFromEnergyJoules(Ej) {
   if (!Number.isFinite(Ej) || Ej <= 0) return null;
   return (2 / 3) * (Math.log10(Ej) - 4.8);
@@ -749,7 +735,7 @@ function ClickTip({ tip, label = "Help" }) {
 
 export default function ImpactMMI() {
   const { eventId: routeEventId } = useParams();
-  const eventId = routeEventId || "us6000rcqw"; // demo default
+  const eventId = routeEventId || "us6000rcqw"; //demo default
 
   const mapRef = useRef(null);
   const containerRef = useRef(null);
@@ -758,38 +744,31 @@ export default function ImpactMMI() {
 
   const [helpOpen, setHelpOpen] = useState(false);
 
-  // Crater
   const craterLayerRef = useRef(null);
   const impactLatLonRef = useRef(null);
   const [craterVisible, setCraterVisible] = useState(false);
 
-  // Fire
   const fireLayerRef = useRef(null);
   const [fireVisible, setFireVisible] = useState(false);
   const [fireParams, setFireParams] = useState(null);
 
-  // Shock
   const shockLayerRef = useRef(null);
   const [shockVisible, setShockVisible] = useState(false);
   const [shockParams, setShockParams] = useState(null);
 
-  // Inputs + crater dims
   const [impactInputs, setImpactInputs] = useState(null);
   const [craterDims, setCraterDims] = useState(null);
 
-  // Mw (η fixed)
   const [mwEquivalent, setMwEquivalent] = useState(null);
 
   const navigate = useNavigate();
 
-  // UI state
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [selectedLabel, setSelectedLabel] = useState(null);
   const [impactInfo, setImpactInfo] = useState(null);
 
   const [mmiOpen, setMmiOpen] = useState(false);
 
-  // PAGER state
   const [exposureTotals, setExposureTotals] = useState(null);
   const [cities, setCities] = useState([]);
   const [popLoading, setPopLoading] = useState(false);
@@ -800,34 +779,33 @@ export default function ImpactMMI() {
   const [lossError, setLossError] = useState(null);
   const [histUrls, setHistUrls] = useState({ fatal: null, econ: null });
 
-  // Tsunami tabs
   const [tsuTab, setTsuTab] = useState("summary");
   useEffect(() => {
     mascotSay("Oh no! You've chosen to impact it. Let's see what happens!");
     const t1 = setTimeout(() => {
       mascotSay("Asteroids hit Earth all the time, but a big one could change everything!");
-    }, 10000);  // Aumenté el tiempo de espera
+    }, 10000);
     const t2 = setTimeout(() => {
       mascotSay("Now let's look at the consequences!");
-    }, 20000);  // Aumenté el tiempo de espera
+    }, 20000);
     const t3 = setTimeout(() => {
       mascotSay("Asteroid impacts are one of nature’s most powerful forces — but don’t worry, we’re keeping an eye on them!");
-    }, 30000);  // Aumenté el tiempo de espera
+    }, 30000);
     const t4 = setTimeout(() => {
       mascotSay("The higher the seismic efficiency, the more of the impact's energy is converted into shaking. That’s why earthquakes and impacts can feel so similar!");
-    }, 40000);  // Aumenté el tiempo de espera
+    }, 40000); 
     const t5 = setTimeout(() => {
       mascotSay("Did you know? Asteroids made of metal are much denser than those made of ice or rock. They hit harder!");
-    }, 50000);  // Aumenté el tiempo de espera
+    }, 50000);
     const t6 = setTimeout(() => {
       mascotSay("The speed of an asteroid can reach up to 70,000 km/h — that’s more than 60 times faster than a bullet!");
-    }, 60000);  // Aumenté el tiempo de espera
+    }, 60000);
     const t7 = setTimeout(() => {
       mascotSay("If an asteroid hits the ocean, it could trigger a massive tsunami — waves big enough to wipe out coastal cities. 🌊");
-    }, 70000);  // Aumenté el tiempo de espera
+    }, 70000);
     const t8 = setTimeout(() => {
       mascotSay("The largest asteroid impact in recorded history happened 66 million years ago, and it wiped out the dinosaurs.");
-    }, 80000);  // Aumenté el tiempo de espera
+    }, 80000);
 
     return () => {
       clearTimeout(t1);
@@ -1067,7 +1045,6 @@ export default function ImpactMMI() {
           map.invalidateSize();
         }
 
-        // === PAGER / losspager ===
         const pager = (detail.properties?.products?.losspager
           ?? detail.properties?.products?.pager
           ?? [])[0];
@@ -1130,7 +1107,6 @@ export default function ImpactMMI() {
     return () => { abort = true; };
   }, [eventId, selectedLabel, craterVisible, craterDims, fireVisible, fireParams, shockVisible, shockParams, mwEquivalent]);
 
-  // Restyle MMI (no refetch)
   useEffect(() => {
     const layer = contoursLayerRef.current;
     if (!layer) return;
@@ -1196,10 +1172,8 @@ export default function ImpactMMI() {
 
   return (
     <div style={styles.appWrap}>
-      {/* Mapa */}
       <div ref={containerRef} style={styles.map} />
 
-      {/* Tirador lateral cuando el panel está cerrado */}
       {!drawerOpen && (
         <button
           style={styles.pullTab}
@@ -1211,7 +1185,6 @@ export default function ImpactMMI() {
         </button>
       )}
 
-      {/* AYUDA flotante: si está cerrado, muestra "?" */}
       {!helpOpen && (
         <button
           style={styles.helpFab}
@@ -1231,7 +1204,7 @@ export default function ImpactMMI() {
           style={{
             position: "absolute",
             top: 12,
-            right: 60, // separa del botón de ayuda
+            right: 60,
             zIndex: 1100,
             width: 100,
             height: 36,
@@ -1252,7 +1225,6 @@ export default function ImpactMMI() {
         </button>
       )}
 
-      {/* Panel de ayuda: si está abierto, muestra info y × */}
       {helpOpen && (
         <div style={styles.titleBox}>
           <div style={styles.helpHeader}>
@@ -1294,7 +1266,6 @@ export default function ImpactMMI() {
         </div>
       )}
 
-      {/* Drawer lateral */}
       <div
         style={{
           ...styles.drawer,
@@ -1316,7 +1287,6 @@ export default function ImpactMMI() {
           </button>
         </div>
 
-        {/* (1) Impact Energy — con tooltips educativos */}
         <div style={{ marginTop: 18 }}>
           <div style={styles.sectionHeaderRow}>
             <div style={styles.subTitle}>1) Impact energy</div>
@@ -1341,7 +1311,7 @@ export default function ImpactMMI() {
               ].map(({ label, value, tip }, i) => (
                 <div key={i} style={styles.infoRow}>
                   <div style={styles.infoLabel}>
-                    <span /* ¡sin title! */>{label}</span>
+                    <span>{label}</span>
                     <ClickTip tip={tip} label={`About ${label}`} />
                   </div>
                   <div style={styles.infoValue}>{value}</div>
@@ -1351,7 +1321,6 @@ export default function ImpactMMI() {
           )}
         </div>
 
-        {/* (2) Ground shaking (MMI) — unified styling */}
         <div style={{ marginTop: 18 }}>
           <div style={styles.sectionHeaderRow}>
             <div style={styles.subTitle}>2) Ground shaking (MMI)</div>
@@ -1370,12 +1339,10 @@ export default function ImpactMMI() {
                 “What does this intensity feel like?”
               </div>
 
-              {/* Explicación (plegable) en tono del panel */}
               <InfoNote title="Explanation (MMI)">
                 <MiniMarkdown text={HELP.mmi} />
               </InfoNote>
 
-              {/* Paleta de MMI con botón “Show all” */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div style={{ fontSize: 13, opacity: .85 }}>Select an intensity:</div>
                 <button
@@ -1406,8 +1373,6 @@ export default function ImpactMMI() {
                 ))}
               </div>
 
-
-              {/* Caja informativa con la “card” oscura del panel */}
               <div style={{ ...styles.card, marginTop: 10 }}>
                 {selectedLabel ? (
                   <>
@@ -1429,10 +1394,6 @@ export default function ImpactMMI() {
           )}
         </div>
 
-
-
-
-        {/* (3) Exposed population — collapsible */}
         <div style={{ marginTop: 18 }}>
           <div style={styles.sectionHeaderRow}>
             <div style={styles.subTitle}>3) Exposed population</div>
@@ -1502,7 +1463,6 @@ export default function ImpactMMI() {
           )}
         </div>
 
-        {/* (4) Economic & fatality risk — collapsible */}
         <div style={{ marginTop: 18 }}>
           <div style={styles.sectionHeaderRow}>
             <div style={styles.subTitle}>4) Economic & fatality risk</div>
@@ -1585,7 +1545,6 @@ export default function ImpactMMI() {
           )}
         </div>
 
-        {/* (5) Crater size estimation — collapsible */}
         <div style={{ marginTop: 18 }}>
           <div style={styles.sectionHeaderRow}>
             <div style={styles.subTitle}>5) Crater size estimation</div>
@@ -1633,7 +1592,6 @@ export default function ImpactMMI() {
           )}
         </div>
 
-        {/* (6) Fire ring — collapsible */}
         <div style={{ marginTop: 18 }}>
           <div style={styles.sectionHeaderRow}>
             <div style={styles.subTitle}>6) Fire ring (thermal dose)</div>
@@ -1680,7 +1638,6 @@ export default function ImpactMMI() {
           )}
         </div>
 
-        {/* (7) Shock wave — collapsible */}
         <div style={{ marginTop: 18 }}>
           <div style={styles.sectionHeaderRow}>
             <div style={styles.subTitle}>7) Shock wave (overpressure)</div>
@@ -1728,7 +1685,6 @@ export default function ImpactMMI() {
           )}
         </div>
 
-        {/* (8) Tsunami information — unified (collapsible + tabs) */}
         <div style={{ marginTop: 18 }}>
           <div style={styles.sectionHeaderRow}>
             <div style={styles.subTitle}>8) Tsunami information</div>
@@ -1745,7 +1701,6 @@ export default function ImpactMMI() {
 
           {openSections.tsunami && (
             <div id="tsu-info-panel" style={{ ...styles.card }}>
-              {/* Tabs */}
               <div style={styles.tabsRow}>
                 <button
                   style={{ ...styles.tabBtn, ...(tsuTab === "summary" ? styles.tabBtnActive : null) }}
@@ -1761,7 +1716,6 @@ export default function ImpactMMI() {
                 </button>
               </div>
 
-              {/* Content per tab */}
               {tsuTab === "summary" && (
                 <div>
                   <div style={{ marginBottom: 8 }}>

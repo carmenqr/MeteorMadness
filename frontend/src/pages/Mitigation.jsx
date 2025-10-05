@@ -1,8 +1,6 @@
-// src/pages/Mitigation.jsx
 import React, { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
-// Si usas bundler que soporta import de assets:
 import deflectionImg from "../assets/deflection.png";
 import nuclearImg from "../assets/nucleardestruction.png";
 import laserImg from "../assets/laser.png";
@@ -119,8 +117,6 @@ export default function Mitigation() {
   );
 }
 
-/* ---------- Reusable Components ---------- */
-
 function AccordionCard({ title, summary, image, children, facts = [] }) {
   const onToggle = (e) => {
     if (e.currentTarget.open) {
@@ -181,8 +177,6 @@ function ImgCard({ src, alt }) {
     />
   );
 }
-
-/* ---------- Styles ---------- */
 
 const styles = {
   page: {

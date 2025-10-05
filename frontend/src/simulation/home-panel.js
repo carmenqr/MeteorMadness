@@ -1,6 +1,4 @@
-import * as THREE from 'three'; // si ya estaba, mantener; si no se usa puedes quitarlo
-// src/home-panel.js
-// Self-contained side panel for asteroid/planet info with didactic explanations
+import * as THREE from 'three';
 import { mascotSay } from "../utils/mascotBus.js";
 
 
@@ -10,7 +8,6 @@ let keydownHandler = null;
 
 const resetHandlers = new Set();
 
-// --- Impactor form state & mini API ---
 let impactorState = { massKg: null, speedKms: null, densityKgM3: null };
 const impactorListeners = new Set();
 
@@ -23,7 +20,6 @@ export function onImpactorChange(handler) {
   return () => impactorListeners.delete(handler);
 }
 
-/** Allow home.js to react to "Restore" click */
 export function onPanelReset(handler) {
   resetHandlers.add(handler);
   return () => resetHandlers.delete(handler);
@@ -131,9 +127,7 @@ export function hidePanel() {
   panelEl.innerHTML = '';
 }
 
-// Export new destroy function
 export function destroyInfoPanel() {
-  // Evitar ReferenceError (ahora todas existen)
   if (keydownHandler) {
     window.removeEventListener('keydown', keydownHandler);
     keydownHandler = null;
@@ -150,7 +144,6 @@ export function destroyInfoPanel() {
   impactorListeners.clear();
 }
 
-/** Definitions, labels and units for common orbital elements */
 const PARAM_DEFS = {
   a: {
     label: 'Semi-major axis (a)', unit: 'AU',
@@ -227,7 +220,6 @@ function formatValue(key, raw) {
   return unit ? `${h(raw)} ${unit}` : h(raw);
 }
 
-/** Ordered keys to display if present in item.obj */
 const ORDER = ['a', 'e', 'i', 'om', 'w', 'mean_anomaly_deg', 'M0', 'mean_motion', 'n', 'epoch', 'hazardous'];
 
 export function showPanelFor(item) {
@@ -237,19 +229,16 @@ export function showPanelFor(item) {
   const obj = item.obj || {};
   const displayName = (obj.name || item.mesh?.name || 'Object');
 
-  // —— SPECIAL CASE: Impactor2025 -> show form instead of info ——
   if (String(displayName).toLowerCase() === 'impactor2025') {
     try { mascotClear(); } catch { }
-    // --- Mascot messages for Impactor scene ---
     mascotSay("🛰️ Welcome to the Impactor setup!");
     setTimeout(() => mascotSay("Here you can set the asteroid’s mass, speed, and density."), 6000);
     setTimeout(() => mascotSay("Once ready, click 'Impact' to simulate or 'Mitigate' to prevent disaster."), 12000);
 
-    const MAX_MASS_KG = 1e12; // 1 billón de toneladas = 10^12 kg
-    const MIN_VEL_KMS = 11;   // 11 km/s
-    const MAX_VEL_KMS = 72;   // 72 km/s
+    const MAX_MASS_KG = 1e12;
+    const MIN_VEL_KMS = 11;
+    const MAX_VEL_KMS = 72;
 
-    // precrear ids únicos para tooltips
     const tipMassId = `tip-mass-${Math.random().toString(36).slice(2, 7)}`;
     const tipVelId = `tip-vel-${Math.random().toString(36).slice(2, 7)}`;
     const tipDenId = `tip-den-${Math.random().toString(36).slice(2, 7)}`;
@@ -319,7 +308,6 @@ export function showPanelFor(item) {
     `;
     panelEl.style.display = 'block';
 
-    // Buttons
     panelEl.querySelector('#btn-reset')?.addEventListener('click', () => {
       for (const fn of resetHandlers) try { fn(); } catch { }
     });
@@ -329,7 +317,6 @@ export function showPanelFor(item) {
     const $dens = panelEl.querySelector('#sel-density');
     const $msg = panelEl.querySelector('#msg-validation');
 
-    // Toggle de los "?" del formulario
     panelEl.querySelectorAll('.qmark.inline').forEach(el => {
       el.addEventListener('click', () => {
         const id = el.getAttribute('data-tip');
@@ -390,7 +377,6 @@ export function showPanelFor(item) {
     $vel.addEventListener('change', updateVel);
     $dens.addEventListener('change', updateDens);
 
-    // Navegación
     panelEl.querySelector('#btn-impact')?.addEventListener('click', () => {
       if (validateAndShow()) {
         window.dispatchEvent(new CustomEvent('panel:navigate', { detail: '/impact' }));
@@ -402,10 +388,9 @@ export function showPanelFor(item) {
       }
     });
 
-    return; // <— no renderizamos el modo info
+    return;
   }
 
-  // —— Default info mode ——
   const introHTML = `
     <div class="intro">
       <b>How do we compute an orbit?</b><br/>

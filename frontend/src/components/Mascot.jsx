@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import "./Mascot.css";
+import "../styles/Mascot.css";
 import happyRobot from "../assets/happy_robot.png";
 
 export default function Mascot({

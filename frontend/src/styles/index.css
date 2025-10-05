@@ -3,7 +3,7 @@ html, body, #root {
   margin: 0;
 }
 body {
-  background: #000000;   /* mismo fondo que la escena */
-  overflow: hidden;      /* evita scroll */
+  background: #000000;
+  overflow: hidden;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
 }
