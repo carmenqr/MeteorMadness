@@ -44,38 +44,47 @@ If Python is **not installed**:
   npm install
 
 ### 1️⃣ Clone the repository
-
+```bash
 git clone https://github.com/carmenqr/MeteorMadness.git
 
 cd MeteorMadness
-
+```
 ### 2️⃣ Set up the Backend (Flask + Python)
+```bash
 cd back
-
+```
 #### Create
+```bash
 python -m venv env
-
+```
 #### Activate (Linux/Mac)
+```bash
 source env/bin/activate
-
+```
 #### Install dependencies
+```bash
 pip install -r requirements.txt
-
+```
 #### Configurate APIs
+```bash
 export NASA_API_KEY="BrayMFziYdhq2l5OaNMzEnpL46gaVEWEbVjDzOQe"
-
+```
 #### Run the Flask App
+```bash
 python app.py
-
+```
 
 ### 3️⃣ Set up the Frontend (React + Vite)
+```bash
 open a new terminal
 cd front
 npm ci
-
+```
 #### Start the development server
+```bash
 npm run dev
 you'll see VITE vX.Y.Z  ready
+```
 Now open your browser at http://127.0.0.1:5173/
 
 
