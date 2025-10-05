@@ -39,6 +39,24 @@ let _visibilityHandler = null;
 let _resizeHandler = null;
 
 let _earthPin = null; // { impactorMesh, earthMesh, camera, controls, targetNDC, depthOffset, lockControls }
+let hoverItem = null; // ahora en ámbito de módulo (accesible desde isolate)
+
+function applyHover(item) {
+  if (!item?.pathLine?.material) return;
+  // Si hay un aislado y no es éste, no elevamos
+  if (isolatedItem && item !== isolatedItem) return;
+  item.pathLine.material.opacity = 1.0;
+}
+
+function restoreHover(item) {
+  if (!item?.pathLine?.material) return;
+  if (isolatedItem === item) {
+    item.pathLine.material.opacity = 1.0;
+    return;
+  }
+  item.pathLine.material.opacity = getBaseOrbitOpacity(item);
+}
+
 function _easeSmoothstep(u){ return u<=0?0:u>=1?1:u*u*(3-2*u); }
 
 function freezeSystem() {
@@ -427,8 +445,198 @@ function ensureLabelStyles() {
   document.head.appendChild(style);
 }
 
+function ensureAstralDropdownStyles() {
+  if (document.getElementById('astral-dropdown-styles')) return;
+  const s = document.createElement('style');
+  s.id = 'astral-dropdown-styles';
+  s.textContent = `
+    .astral-dd {
+      position: relative;
+      width: 240px;
+      font-family: system-ui, sans-serif;
+      user-select: none;
+    }
+    .astral-dd__button {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: linear-gradient(160deg, rgba(22,34,54,0.85), rgba(12,20,32,0.85));
+      color: #d5dfef;
+      border: 1px solid rgba(120,150,200,0.28);
+      box-shadow: 0 4px 16px -4px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(180,210,255,0.05);
+      backdrop-filter: blur(5px);
+      cursor: pointer;
+      font-size: 15px; font-weight: 600;
+    }
+    .astral-dd__button:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(120,170,240,0.55), 0 4px 16px -4px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(180,210,255,0.07);
+      border-color: rgba(160,190,240,0.55);
+    }
+    .astral-dd__chev { transform: translateY(1px); opacity: .9 }
+    .astral-dd__panel {
+      position: absolute; left: 0; right: 0; top: calc(100% + 6px);
+      max-height: min(55vh, 440px);
+      overflow: auto;
+      background: linear-gradient(145deg, rgba(16,28,48,0.95), rgba(20,34,58,0.95));
+      color: #cdd8f0;
+      border: 1px solid rgba(120,150,200,0.28);
+      border-radius: 14px;
+      box-shadow: 0 16px 40px -10px rgba(0,0,0,0.65), inset 0 0 0 1px rgba(180,210,255,0.05);
+      backdrop-filter: blur(6px);
+      padding: 6px;
+      z-index: 1000;
+      display: none;
+    }
+    .astral-dd__option {
+      padding: 10px 12px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .astral-dd__option:hover, .astral-dd__option[aria-selected="true"] {
+      background: rgba(60, 110, 180, 0.25);
+      color: #ffffff;
+    }
+    .astral-dd__optlabel {
+      font-size: 12px; opacity: .75; padding: 8px 10px 4px;
+    }
+    /* Scrollbar sutil */
+    .astral-dd__panel::-webkit-scrollbar { width: 10px }
+    .astral-dd__panel::-webkit-scrollbar-thumb { background: rgba(160,190,240,0.22); border-radius: 10px }
+  `;
+  document.head.appendChild(s);
+}
+
+function createAstralDropdown({ id = 'astral-dropdown', placeholder = 'All objects', onSelect } = {}) {
+  ensureAstralDropdownStyles();
+
+  const root = document.createElement('div');
+  root.className = 'astral-dd';
+  root.id = id;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'astral-dd__button';
+  btn.setAttribute('aria-haspopup', 'listbox');
+  btn.setAttribute('aria-expanded', 'false');
+  btn.innerHTML = `<span class="astral-dd__label">${placeholder}</span>
+                   <span class="astral-dd__chev">▾</span>`;
+  root.appendChild(btn);
+
+  const panel = document.createElement('div');
+  panel.className = 'astral-dd__panel';
+  panel.setAttribute('role', 'listbox');
+  root.appendChild(panel);
+
+  let currentValue = '__all';
+  let options = [];
+
+  function open() {
+    panel.style.display = 'block';
+    btn.setAttribute('aria-expanded', 'true');
+    document.addEventListener('click', clickOutside, true);
+    document.addEventListener('keydown', onKeyDown);
+  }
+  function close() {
+    panel.style.display = 'none';
+    btn.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', clickOutside, true);
+    document.removeEventListener('keydown', onKeyDown);
+  }
+  function toggle() {
+    const isOpen = panel.style.display === 'block';
+    isOpen ? close() : open();
+  }
+  function clickOutside(e) { if (!root.contains(e.target)) close(); }
+
+  function onKeyDown(e) {
+    const opts = Array.from(panel.querySelectorAll('.astral-dd__option'));
+    const idx = opts.findIndex(n => n.getAttribute('data-value') === currentValue);
+    if (e.key === 'Escape') { close(); btn.focus(); }
+    else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = opts[Math.min(opts.length - 1, idx + 1)] || opts[0];
+      next?.scrollIntoView({ block: 'nearest' }); next?.focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = opts[Math.max(0, idx - 1)] || opts[opts.length - 1];
+      prev?.scrollIntoView({ block: 'nearest' }); prev?.focus();
+    } else if (e.key === 'Home') { e.preventDefault(); opts[0]?.focus(); }
+    else if (e.key === 'End') { e.preventDefault(); opts[opts.length - 1]?.focus(); }
+    else if (e.key === 'Enter') { e.preventDefault(); document.activeElement?.click(); }
+  }
+
+  function render() {
+    panel.innerHTML = '';
+    for (const opt of options) {
+      const el = document.createElement('div');
+      el.className = 'astral-dd__option';
+      el.setAttribute('role', 'option');
+      el.setAttribute('tabindex', '0');
+      el.setAttribute('data-value', opt.value);
+      el.textContent = opt.label;
+      if (opt.value === currentValue) el.setAttribute('aria-selected', 'true');
+      el.addEventListener('click', () => {
+        setValue(opt.value);
+        close();
+        onSelect?.(opt.value);
+      });
+      panel.appendChild(el);
+    }
+  }
+
+  function setOptions(newOpts) {
+    options = newOpts || [];
+    render();
+  }
+  function setValue(v) {
+    currentValue = v;
+    const found = options.find(o => o.value === v);
+    const labelEl = btn.querySelector('.astral-dd__label');
+    labelEl.textContent = found?.label ?? placeholder;
+    // marcar selección visual
+    panel.querySelectorAll('.astral-dd__option').forEach(n =>
+      n.setAttribute('aria-selected', n.getAttribute('data-value') === v ? 'true' : 'false'));
+  }
+  function getValue() { return currentValue; }
+
+  btn.addEventListener('click', toggle);
+
+  return { root, setOptions, setValue, getValue, open, close };
+}
+
+function handleAstralSelection(value) {
+  const list = window.__asteroidMeshes || [];
+
+  if (value === '__all') {
+    resetIsolation(list);
+    stopPinEarth();
+    restoreEarthScale(earthItem?.mesh || null);
+    restoreDefaultView({ smooth: true, duration: 600 });
+    resumeSystem();
+    return;
+  }
+
+  const item = list.find(i => (i.mesh?.name || '').toLowerCase() === value.toLowerCase());
+  if (!item) return;
+
+  if (/impactor[- ]?2025/i.test(item.mesh.name)) {
+    simulationPaused = true;
+    window.dispatchEvent(new CustomEvent('sim:pause-orbits'));
+    window.dispatchEvent(new CustomEvent('sim:open-panel'));
+    const b = document.getElementById('btn-start'); if (b) b.style.display = 'none';
+    return;
+  }
+  isolate(item, list);
+}
+
 function ensureUI() {
   ensureLabelStyles();
+  ensureAstralDropdownStyles();
   if (!document.getElementById('labels')) {
     const labels = registerNode(document.createElement('div'));
     labels.id = 'labels';
@@ -505,96 +713,73 @@ function ensureUI() {
     });
   }
 
-  // Contenedor dropdown (top-right)
-  if (!document.getElementById('asteroid-select')) {
+  // Contenedor dropdown (top-right) — versión custom
+  if (!document.getElementById('astral-dropdown')) {
     const wrap = registerNode(document.createElement('div'));
     Object.assign(wrap.style, {
       position: 'fixed', top: '12px', right: '12px', zIndex: 30,
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
       pointerEvents: 'auto', fontFamily: 'system-ui, sans-serif'
     });
+
     const labelSel = document.createElement('div');
     labelSel.textContent = 'Astral Bodies';
     Object.assign(labelSel.style, {
-      fontSize: '22px', fontWeight: '700', color: '#cdd8f0', letterSpacing: '.8px',
-      textShadow:'0 2px 6px rgba(0,0,0,0.65)',
-      background:'linear-gradient(145deg, rgba(16,28,48,0.70), rgba(20,34,58,0.70))',
-      padding:'8px 22px', borderRadius:'26px',
-      border:'1px solid rgba(120,150,200,0.22)', backdropFilter:'blur(5px)',
-      boxShadow:'0 6px 20px -6px rgba(0,0,0,0.65), inset 0 0 0 1px rgba(180,210,255,0.04)',
-      textTransform:'uppercase'
+      fontSize: '22px',
+      fontWeight: '700',
+      color: '#cdd8f0',
+      letterSpacing: '.8px',
+      textShadow: '0 2px 6px rgba(0,0,0,0.65)',
+      textTransform: 'uppercase',
+      background: 'transparent',
+      padding: '0',
+      border: 'none',
+      boxShadow: 'none',
+      backdropFilter: 'none'
     });
-    const sel = document.createElement('select');
-    sel.id = 'asteroid-select';
-    Object.assign(sel.style, {
-      padding: '12px 20px', borderRadius: '16px', background: 'linear-gradient(160deg, rgba(22,34,54,0.85), rgba(12,20,32,0.85))', color: '#d5dfef',
-      border: '1px solid rgba(120,150,200,0.28)', cursor: 'pointer', fontSize: '15px', fontWeight:'500',
-      boxShadow:'0 4px 16px -4px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(180,210,255,0.05)',
-      backdropFilter:'blur(5px)', minWidth:'240px', appearance:'none', WebkitAppearance:'none'
-    });
-    sel.addEventListener('mouseover', () => {
-      sel.style.borderColor = 'rgba(160,190,240,0.55)';
-      sel.style.boxShadow = '0 6px 20px -6px rgba(0,0,0,0.6), 0 0 0 1px rgba(160,190,240,0.25), inset 0 0 0 1px rgba(180,210,255,0.08)';
-    });
-    sel.addEventListener('mouseout', () => {
-      sel.style.borderColor = 'rgba(120,150,200,0.28)';
-      sel.style.boxShadow = '0 4px 16px -4px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(180,210,255,0.05)';
-    });
-    sel.addEventListener('focus', () => {
-      sel.style.outline='none';
-      sel.style.boxShadow='0 0 0 2px rgba(120,170,240,0.55), 0 4px 16px -4px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(180,210,255,0.07)';
-      sel.style.borderColor='rgba(160,190,240,0.55)';
-    });
-    sel.addEventListener('blur', () => {
-      sel.style.boxShadow='0 4px 16px -4px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(180,210,255,0.05)';
-      sel.style.borderColor = 'rgba(120,150,200,0.28)';
-    });
-    sel.innerHTML = '<option value="__loading" disabled selected>Loading…</option>';
 
-    sel.addEventListener('change', (e) => {
-      const v = e.target.value;
-      const list = window.__asteroidMeshes || [];
-      if (v === '__all') {
-        resetIsolation(list);
-        stopPinEarth();
-        restoreEarthScale(earthItem?.mesh || null);
-        restoreDefaultView({ smooth: true, duration: 600 });
-        resumeSystem();
-        return;
-      }
-      const item = list.find(i => (i.mesh?.name || '').toLowerCase() === v.toLowerCase());
-      if (!item) return;
-      if (/impactor[- ]?2025/i.test(item.mesh.name)) {
-        simulationPaused = true;
-        window.dispatchEvent(new CustomEvent('sim:pause-orbits'));
-        window.dispatchEvent(new CustomEvent('sim:open-panel'));
-        const b = document.getElementById('btn-start'); if (b) b.style.display = 'none';
-        return;
-      }
-      isolate(item, list);
+    const dd = createAstralDropdown({
+      id: 'astral-dropdown',
+      placeholder: 'All objects',
+      onSelect: handleAstralSelection
     });
+    // guarda referencia global para poder poblar luego
+    window.__astralDropdown = dd;
+
     wrap.appendChild(labelSel);
-    wrap.appendChild(sel);
-    document.body.appendChild(wrap);
+    wrap.appendChild(dd.root);
+    document.body.appendChild(registerNode(wrap));
+  }
+}
+
+function getBaseOrbitOpacity(item) {
+  if (!item) return 0.25;
+  if (item === earthItem) return 0.6;
+  if (/impactor[- ]?2025/i.test(item.mesh?.name || '')) return 0.4;
+  return 0.25;
+}
+
+// (Opcional) helper para fijar a base
+function applyBaseOpacity(item) {
+  if (item?.pathLine?.material) {
+    item.pathLine.material.opacity = getBaseOrbitOpacity(item);
   }
 }
 
 function isolate(item, list) {
+  if (hoverItem && hoverItem !== item) {
+    restoreHover(hoverItem);
+    hoverItem = null;
+  }
   isolatedItem = item;
   for (const it of list) {
     const sel = it === item;
-
     if (it.mesh) it.mesh.visible = sel;
-
-    if (it.pathLine) {
+    if (it.pathLine?.material) {
       it.pathLine.visible = sel;
-      if (it.pathLine.material) {
-        it.pathLine.material.transparent = true;
-        it.pathLine.material.opacity = sel ? 1.0 : 0.25;
-      }
+      it.pathLine.material.transparent = true;
+      it.pathLine.material.opacity = sel ? 1.0 : getBaseOrbitOpacity(it);
     }
-
-    // === política de labels ===
     setLabelMode(it, sel ? 'auto' : 'hide');
   }
   showPanelFor(item);
@@ -602,21 +787,21 @@ function isolate(item, list) {
 
 function isolateKeep(keepItems, list) {
   const keepSet = new Set(keepItems.filter(Boolean));
+  if (hoverItem && !keepSet.has(hoverItem)) {
+    restoreHover(hoverItem);
+    hoverItem = null;
+  }
   isolatedItem = keepItems[0] || null;
   for (const it of list) {
     const keep = keepSet.has(it);
-
     if (it.mesh) it.mesh.visible = keep;
-
-    if (it.pathLine) {
+    if (it.pathLine?.material) {
       it.pathLine.visible = keep;
-      if (it.pathLine.material) {
-        it.pathLine.material.transparent = true;
-        it.pathLine.material.opacity = keep ? (keepItems.length === 1 ? 1.0 : 0.9) : 0.25;
-      }
+      it.pathLine.material.transparent = true;
+      it.pathLine.material.opacity = keep
+        ? (keepItems.length === 1 ? 1.0 : 0.9)
+        : getBaseOrbitOpacity(it);
     }
-
-    // === política de labels ===
     setLabelMode(it, keep ? 'auto' : 'hide');
   }
 }
@@ -626,23 +811,16 @@ function resetIsolation(listRef) {
   isolatedItem = null;
   for (const it of list) {
     if (it.mesh) it.mesh.visible = true;
-
-    if (it.pathLine) {
+    if (it.pathLine?.material) {
       it.pathLine.visible = true;
-      if (it.pathLine.material) {
-        it.pathLine.material.transparent = true;
-        if (it === earthItem) {
-          it.pathLine.material.opacity = 0.6;
-        } else if (/impactor[- ]?2025/i.test(it.mesh.name || '')) {
-          it.pathLine.material.opacity = 0.4;
-        } else {
-          it.pathLine.material.opacity = 0.25;
-        }
-      }
+      it.pathLine.material.transparent = true;
+      it.pathLine.material.opacity = getBaseOrbitOpacity(it);
     }
-
-    // === política de labels ===
     setLabelMode(it, 'auto');
+  }
+  if (hoverItem) {
+    restoreHover(hoverItem);
+    hoverItem = null;
   }
   hidePanel();
 }
@@ -784,25 +962,17 @@ function iniciarSimulacion(mountEl) {
   }
 
   // Rellenar dropdown ahora que tenemos asteroidMeshes
-  const sel = document.getElementById('asteroid-select');
-  if (sel) {
-    const items = [...asteroidMeshes];
-    // Orden alfabético por nombre
-    items.sort((a,b) => (a.mesh.name||'').localeCompare(b.mesh.name||''));
-    sel.innerHTML = '';
-    const optAll = document.createElement('option');
-    optAll.value = '__all';
-    optAll.textContent = 'All objects';
-    sel.appendChild(optAll);
-    for (const it of items) {
-      const o = document.createElement('option');
-      o.value = it.mesh.name;
-      o.textContent = it.mesh.name;
-      sel.appendChild(o);
-    }
-    // Seleccionar placeholder inicial
-    sel.value = '__all';
+  // Rellenar dropdown custom
+  if (window.__astralDropdown) {
+    const items = [...asteroidMeshes].sort((a,b) => (a.mesh.name||'').localeCompare(b.mesh.name||''));
+    const options = [
+      { value: '__all', label: 'All objects' },
+      ...items.map(it => ({ value: it.mesh.name, label: it.mesh.name }))
+    ];
+    window.__astralDropdown.setOptions(options);
+    window.__astralDropdown.setValue('__all');
   }
+
 
   // ——— IMPACTOR2025: localizar, destacar y preparar aislamiento + pausa al abrir panel ———
   const impactorItem = asteroidMeshes.find(i => /impactor[- ]?2025/i.test(i.mesh.name));
@@ -894,6 +1064,10 @@ function iniciarSimulacion(mountEl) {
   const mouse = new THREE.Vector2();
   const el = renderer.domElement;
 
+  // Raycaster Hover
+  const pointer = new THREE.Vector2();
+  const hoverRaycaster = new THREE.Raycaster();
+
   addListener(renderer.domElement, 'click', (e) => {
     const rect = el.getBoundingClientRect();
     mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -920,117 +1094,153 @@ function iniciarSimulacion(mountEl) {
     // Asteroide normal: aislar + info
     isolate(item, asteroidMeshes);
   });
+
+  addListener(el, 'pointermove', (e) => {
+    // Si hay uno aislado, no hacemos hover sobre otros (el aislado ya está a 1.0)
+    //if (isolatedItem) return;
+
+    const rect = el.getBoundingClientRect();
+    pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+    const visibles = asteroidMeshes.filter(i => i.mesh?.visible).map(i => i.mesh);
+    hoverRaycaster.setFromCamera(pointer, camera);
+    const hit = hoverRaycaster.intersectObjects(visibles, false)[0];
+
+    if (!hit) {
+      if (hoverItem) {
+        restoreHover(hoverItem);
+        hoverItem = null;
+      }
+      return;
+    }
+
+    const newItem = asteroidMeshes.find(i => i.mesh === hit.object);
+    if (!newItem) return;
+    if (newItem === hoverItem) return;
+
+    if (hoverItem) restoreHover(hoverItem);
+    hoverItem = newItem;
+    applyHover(hoverItem);
+  });
+
+  addListener(el, 'pointerleave', () => {
+    if (hoverItem) {
+      restoreHover(hoverItem);
+      hoverItem = null;
+    }
+  });
   
-    // Reemplaza la función animate completa por:
-    let lastFrameMsLocal = performance.now();
-    function animate() {
-        _frameId = requestAnimationFrame(animate);
-        const now = performance.now();
-        const dt = now - lastFrameMsLocal;
-        lastFrameMsLocal = now;
+  // Reemplaza la función animate completa por:
+  let lastFrameMsLocal = performance.now();
+  function animate() {
+      _frameId = requestAnimationFrame(animate);
+      const now = performance.now();
+      const dt = now - lastFrameMsLocal;
+      lastFrameMsLocal = now;
 
+      if (!simulationPaused && !tabHidden) {
+          simDays += (dt/1000)*TIME_SCALE;
+      }
+      const tJulian = baseJulian + simDays;
+
+      for (const item of asteroidMeshes) {
         if (!simulationPaused && !tabHidden) {
-            simDays += (dt/1000)*TIME_SCALE;
+          const { pos } = propagate(item.obj, tJulian);
+          item.mesh.position.copy(pos);
         }
-        const tJulian = baseJulian + simDays;
-
-        for (const item of asteroidMeshes) {
-          if (!simulationPaused && !tabHidden) {
-            const { pos } = propagate(item.obj, tJulian);
-            item.mesh.position.copy(pos);
-          }
-          if (item.labelEl) {
-            const mode = getLabelMode(item);           // 'auto' o 'hide'
-            if (mode === 'hide') {
-              item.labelEl.style.display = 'none';     // nunca mostrar si está forzado a oculto
+        if (item.labelEl) {
+          const mode = getLabelMode(item);           // 'auto' o 'hide'
+          if (mode === 'hide') {
+            item.labelEl.style.display = 'none';     // nunca mostrar si está forzado a oculto
+          } else {
+            // modo 'auto': culling normal por pantalla
+            const sp = item.mesh.position.clone().project(camera);
+            const onScreen = (sp.z < 1) && (sp.x > -1.1 && sp.x < 1.1) && (sp.y > -1.1 && sp.y < 1.1);
+            if (onScreen) {
+              const x = (sp.x * 0.5 + 0.5) * window.innerWidth;
+              const y = (-sp.y * 0.5 + 0.5) * window.innerHeight;
+              item.labelEl.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
+              item.labelEl.style.display = 'block';
             } else {
-              // modo 'auto': culling normal por pantalla
-              const sp = item.mesh.position.clone().project(camera);
-              const onScreen = (sp.z < 1) && (sp.x > -1.1 && sp.x < 1.1) && (sp.y > -1.1 && sp.y < 1.1);
-              if (onScreen) {
-                const x = (sp.x * 0.5 + 0.5) * window.innerWidth;
-                const y = (-sp.y * 0.5 + 0.5) * window.innerHeight;
-                item.labelEl.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
-                item.labelEl.style.display = 'block';
-              } else {
-                item.labelEl.style.display = 'none';
-              }
+              item.labelEl.style.display = 'none';
             }
           }
         }
+      }
 
-        // --- PIN: recolocar TIERRA en esquina inferior-izquierda respecto al IMPACTOR ---
-        if (_earthPin) {
-          const S = _earthPin;
-          const { impactorMesh, earthMesh, camera, controls } = S;
-          if (impactorMesh?.position && earthMesh?.position) {
-            const now = performance.now();
-            const u = S.dur > 0 ? _easeSmoothstep(Math.min(1, (now - S.t0) / S.dur)) : 1;
+      // --- PIN: recolocar TIERRA en esquina inferior-izquierda respecto al IMPACTOR ---
+      if (_earthPin) {
+        const S = _earthPin;
+        const { impactorMesh, earthMesh, camera, controls } = S;
+        if (impactorMesh?.position && earthMesh?.position) {
+          const now = performance.now();
+          const u = S.dur > 0 ? _easeSmoothstep(Math.min(1, (now - S.t0) / S.dur)) : 1;
 
-            // ---- 1) fade de órbitas ----
-            if (S.orbits?.length) {
-              for (const ln of S.orbits) {
-                if (!ln?.material) continue;
-                const mat = ln.material;
-                const orig = typeof mat.userData?.__origOpacity === 'number' ? mat.userData.__origOpacity : (mat.opacity ?? 1);
-                mat.opacity = (1 - u) * orig; // fade out
-                if (u >= 1 && !S.fadedDone) { ln.visible = false; }
-              }
-              if (u >= 1) S.fadedDone = true;
+          // ---- 1) fade de órbitas ----
+          if (S.orbits?.length) {
+            for (const ln of S.orbits) {
+              if (!ln?.material) continue;
+              const mat = ln.material;
+              const orig = typeof mat.userData?.__origOpacity === 'number' ? mat.userData.__origOpacity : (mat.opacity ?? 1);
+              mat.opacity = (1 - u) * orig; // fade out
+              if (u >= 1 && !S.fadedDone) { ln.visible = false; }
             }
-
-            // ---- 2) tween de cámara: distancia + yaw/pitch alrededor del impactor ----
-            const pI = impactorMesh.position;
-            if (controls) controls.target.copy(pI);
-
-            // distancia
-            const dist = THREE.MathUtils.lerp(S.startDist, S.targetDist, u);
-
-            // yaw/pitch blending
-            const yaw = THREE.MathUtils.lerp(S.startYaw, S.targetYaw, u);
-            const pitch = THREE.MathUtils.lerp(S.startPitch, S.targetPitch, u);
-
-            // construir dirección desde yaw/pitch (convención: yaw sobre Y+, pitch sobre eje lateral)
-            const baseDir = new THREE.Vector3(0, 0, 1); // mirando +Z desde el impactor
-            const upWorld = new THREE.Vector3(0,1,0);
-            const qYaw = new THREE.Quaternion().setFromAxisAngle(upWorld, yaw);
-            const dirYaw = baseDir.clone().applyQuaternion(qYaw);
-            const side = new THREE.Vector3().crossVectors(upWorld, dirYaw).normalize();
-            const qPitch = new THREE.Quaternion().setFromAxisAngle(side, pitch);
-            const dirFinal = dirYaw.clone().applyQuaternion(qPitch).normalize();
-
-            camera.position.copy(pI.clone().add(dirFinal.multiplyScalar(dist)));
-            camera.up.set(0,1,0);
-            camera.updateMatrixWorld();
-            camera.updateProjectionMatrix();
-
-            // ---- 3) escalar tierra suavemente ----
-            const scaleNow = THREE.MathUtils.lerp(S.startEarthScale, S.earthScale, u);
-            earthMesh.scale.setScalar(scaleNow);
-
-            // ---- 4) fijar TIERRA en esquina (NDC → cámara → mundo) con profundidad “cercana” ----
-            const pI_cam = pI.clone().applyMatrix4(camera.matrixWorldInverse);
-            const impactorDepth = Math.max(1e-4, -pI_cam.z);
-            const depth = Number.isFinite(S.earthDepthFactor)
-              ? Math.max(1e-4, impactorDepth * S.earthDepthFactor)
-              : Math.max(1e-4, impactorDepth + (S.depthOffset ?? 0.2));
-
-            const fovY = (camera.fov ?? 50) * Math.PI/180;
-            const tanY = Math.tan(fovY/2);
-            const tanX = tanY * (camera.aspect || (window.innerWidth / Math.max(1, window.innerHeight)));
-            const desiredX_cam = (S.targetNDC.x) * tanX * depth;
-            const desiredY_cam = (S.targetNDC.y) * tanY * depth;
-            const desiredZ_cam = -depth;
-
-            const desired_cam = new THREE.Vector3(desiredX_cam, desiredY_cam, desiredZ_cam);
-            const desired_world = desired_cam.applyMatrix4(camera.matrixWorld);
-            earthMesh.position.copy(desired_world);
+            if (u >= 1) S.fadedDone = true;
           }
+
+          // ---- 2) tween de cámara: distancia + yaw/pitch alrededor del impactor ----
+          const pI = impactorMesh.position;
+          if (controls) controls.target.copy(pI);
+
+          // distancia
+          const dist = THREE.MathUtils.lerp(S.startDist, S.targetDist, u);
+
+          // yaw/pitch blending
+          const yaw = THREE.MathUtils.lerp(S.startYaw, S.targetYaw, u);
+          const pitch = THREE.MathUtils.lerp(S.startPitch, S.targetPitch, u);
+
+          // construir dirección desde yaw/pitch (convención: yaw sobre Y+, pitch sobre eje lateral)
+          const baseDir = new THREE.Vector3(0, 0, 1); // mirando +Z desde el impactor
+          const upWorld = new THREE.Vector3(0,1,0);
+          const qYaw = new THREE.Quaternion().setFromAxisAngle(upWorld, yaw);
+          const dirYaw = baseDir.clone().applyQuaternion(qYaw);
+          const side = new THREE.Vector3().crossVectors(upWorld, dirYaw).normalize();
+          const qPitch = new THREE.Quaternion().setFromAxisAngle(side, pitch);
+          const dirFinal = dirYaw.clone().applyQuaternion(qPitch).normalize();
+
+          camera.position.copy(pI.clone().add(dirFinal.multiplyScalar(dist)));
+          camera.up.set(0,1,0);
+          camera.updateMatrixWorld();
+          camera.updateProjectionMatrix();
+
+          // ---- 3) escalar tierra suavemente ----
+          const scaleNow = THREE.MathUtils.lerp(S.startEarthScale, S.earthScale, u);
+          earthMesh.scale.setScalar(scaleNow);
+
+          // ---- 4) fijar TIERRA en esquina (NDC → cámara → mundo) con profundidad “cercana” ----
+          const pI_cam = pI.clone().applyMatrix4(camera.matrixWorldInverse);
+          const impactorDepth = Math.max(1e-4, -pI_cam.z);
+          const depth = Number.isFinite(S.earthDepthFactor)
+            ? Math.max(1e-4, impactorDepth * S.earthDepthFactor)
+            : Math.max(1e-4, impactorDepth + (S.depthOffset ?? 0.2));
+
+          const fovY = (camera.fov ?? 50) * Math.PI/180;
+          const tanY = Math.tan(fovY/2);
+          const tanX = tanY * (camera.aspect || (window.innerWidth / Math.max(1, window.innerHeight)));
+          const desiredX_cam = (S.targetNDC.x) * tanX * depth;
+          const desiredY_cam = (S.targetNDC.y) * tanY * depth;
+          const desiredZ_cam = -depth;
+
+          const desired_cam = new THREE.Vector3(desiredX_cam, desiredY_cam, desiredZ_cam);
+          const desired_world = desired_cam.applyMatrix4(camera.matrixWorld);
+          earthMesh.position.copy(desired_world);
         }
+      }
 
 
-        controls.update();
-        renderer.render(scene, camera);
+      controls.update();
+      renderer.render(scene, camera);
     }
     animate();
 
