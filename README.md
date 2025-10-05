@@ -68,6 +68,7 @@ git clone https://github.com/carmenqr/MeteorMadness.git
 cd MeteorMadness
 ```
 ### 2️⃣ Set up the Backend (Flask + Python)
+Open a new terminal and move to the backend directory:
 ```bash
 cd backend
 ```
@@ -94,7 +95,7 @@ python app.py
 ```
 
 ### 3️⃣ Set up the Frontend (React + Vite)
-Open a new terminal:
+Open a new terminal and move to the frontend directory:
 ```bash
 cd frontend
 ```
