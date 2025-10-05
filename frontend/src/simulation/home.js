@@ -2,9 +2,13 @@ import * as THREE from 'three';
 import { DEG2RAD } from '../lib/asteroid_utils.js';
 import { propagate, getOrbitPoints } from '../lib/orbit_utils.js';
 import { createScene } from './scene.js';
-import { initInfoPanel, showPanelFor, hidePanel, onPanelReset, destroyInfoPanel } from './home-panel.js';
+import { initInfoPanel, showPanelFor, hidePanel, onPanelReset, destroyInfoPanel, onImpactorChange } from './home-panel.js';
 import earthUrl from '../assets/earth.jpg'
 import asteroidUrl from '../assets/asteroid.jpg'
+import iceUrl from '../assets/ice.jpg';
+import porousRockUrl from '../assets/porous_rock.jpg';
+import rockUrl from '../assets/rock.jpg';
+import ironUrl from '../assets/iron.jpg';
 
 const _domNodes = new Set();
 const _listeners = [];
@@ -512,26 +516,39 @@ function ensureUI() {
     const labelSel = document.createElement('div');
     labelSel.textContent = 'Astral Bodies';
     Object.assign(labelSel.style, {
-      fontSize: '24px', fontWeight: '800', color: '#f2f6ff', letterSpacing: '1px',
-      textShadow:'0 4px 10px rgba(0,0,0,0.7), 0 0 6px rgba(120,170,255,0.35)',
-      background:'linear-gradient(145deg, rgba(10,18,35,0.55), rgba(30,50,90,0.55))',
-      padding:'10px 26px', borderRadius:'32px',
-      border:'1px solid rgba(255,255,255,0.25)', backdropFilter:'blur(6px)',
-      boxShadow:'0 8px 28px -10px rgba(0,0,0,0.75), inset 0 0 0 1px rgba(255,255,255,0.06)',
+      fontSize: '22px', fontWeight: '700', color: '#cdd8f0', letterSpacing: '.8px',
+      textShadow:'0 2px 6px rgba(0,0,0,0.65)',
+      background:'linear-gradient(145deg, rgba(16,28,48,0.70), rgba(20,34,58,0.70))',
+      padding:'8px 22px', borderRadius:'26px',
+      border:'1px solid rgba(120,150,200,0.22)', backdropFilter:'blur(5px)',
+      boxShadow:'0 6px 20px -6px rgba(0,0,0,0.65), inset 0 0 0 1px rgba(180,210,255,0.04)',
       textTransform:'uppercase'
     });
     const sel = document.createElement('select');
     sel.id = 'asteroid-select';
     Object.assign(sel.style, {
-      padding: '14px 22px', borderRadius: '18px', background: 'linear-gradient(155deg, rgba(28,42,70,0.9), rgba(12,18,30,0.9))', color: '#f1f5f9',
-      border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer', fontSize: '16px', fontWeight:'500',
-      boxShadow:'0 6px 22px -6px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.08)',
-      backdropFilter:'blur(7px)', minWidth:'240px', appearance:'none', WebkitAppearance:'none'
+      padding: '12px 20px', borderRadius: '16px', background: 'linear-gradient(160deg, rgba(22,34,54,0.85), rgba(12,20,32,0.85))', color: '#d5dfef',
+      border: '1px solid rgba(120,150,200,0.28)', cursor: 'pointer', fontSize: '15px', fontWeight:'500',
+      boxShadow:'0 4px 16px -4px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(180,210,255,0.05)',
+      backdropFilter:'blur(5px)', minWidth:'240px', appearance:'none', WebkitAppearance:'none'
     });
-    sel.addEventListener('mouseover', () => sel.style.borderColor = '#3b82f6');
-    sel.addEventListener('mouseout', () => sel.style.borderColor = 'rgba(255,255,255,0.25)');
-    sel.addEventListener('focus', () => { sel.style.outline='none'; sel.style.boxShadow='0 0 0 2px rgba(59,130,246,0.55)'; });
-    sel.addEventListener('blur', () => { sel.style.boxShadow='0 4px 18px -4px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.07)'; });
+    sel.addEventListener('mouseover', () => {
+      sel.style.borderColor = 'rgba(160,190,240,0.55)';
+      sel.style.boxShadow = '0 6px 20px -6px rgba(0,0,0,0.6), 0 0 0 1px rgba(160,190,240,0.25), inset 0 0 0 1px rgba(180,210,255,0.08)';
+    });
+    sel.addEventListener('mouseout', () => {
+      sel.style.borderColor = 'rgba(120,150,200,0.28)';
+      sel.style.boxShadow = '0 4px 16px -4px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(180,210,255,0.05)';
+    });
+    sel.addEventListener('focus', () => {
+      sel.style.outline='none';
+      sel.style.boxShadow='0 0 0 2px rgba(120,170,240,0.55), 0 4px 16px -4px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(180,210,255,0.07)';
+      sel.style.borderColor='rgba(160,190,240,0.55)';
+    });
+    sel.addEventListener('blur', () => {
+      sel.style.boxShadow='0 4px 16px -4px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(180,210,255,0.05)';
+      sel.style.borderColor = 'rgba(120,150,200,0.28)';
+    });
     sel.innerHTML = '<option value="__loading" disabled selected>Loading…</option>';
 
     sel.addEventListener('change', (e) => {
@@ -690,6 +707,13 @@ function iniciarSimulacion(mountEl) {
   const maxAniso = renderer.capabilities.getMaxAnisotropy?.() ?? 1;
   const earthTex = texLoader.load(earthUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); });
   const asteroidTex = texLoader.load(asteroidUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); });
+  // Texturas específicas para el impactor según material elegido en el formulario
+  const impactorMaterialTextures = {
+    ice: texLoader.load(iceUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); }),
+    porous_rock: texLoader.load(porousRockUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); }),
+    rock: texLoader.load(rockUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); }),
+    iron: texLoader.load(ironUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); })
+  };
 
   // Earth
   if (earthData) {
@@ -816,6 +840,43 @@ function iniciarSimulacion(mountEl) {
       showPanelFor(impactorItem);
     };
   if (impactorItem) addListener(window, 'sim:open-panel', openPanelHandler);
+
+  // === Suscripción a cambios del formulario del IMPACTOR ===
+  // Mapeo densidad -> clave de textura
+  const densityToKey = (d) => {
+    if (d == null) return null;
+    if (d <= 1100) return 'ice';          // ~1000
+    if (d <= 2000) return 'porous_rock';  // ~1500
+    if (d <= 4000) return 'rock';         // ~3000
+    return 'iron';                        // >= 8000 u otros valores altos
+  };
+  // Registrar listener sólo una vez por simulación
+  onImpactorChange?.(({ densityKgM3 }) => {
+    if (!impactorItem || !impactorItem.mesh) return;
+    const key = densityToKey(densityKgM3);
+    if (!key) return;
+    const tex = impactorMaterialTextures[key];
+    if (tex && impactorItem.mesh.material) {
+      impactorItem.mesh.material.map = tex;
+      // Ajustes de color/emissive ligeros según material
+      try {
+        if (key === 'ice') {
+          impactorItem.mesh.material.color.set(0xe0f6ff);
+          impactorItem.mesh.material.emissive.set(0x203040);
+        } else if (key === 'porous_rock') {
+          impactorItem.mesh.material.color.set(0xb9a899);
+          impactorItem.mesh.material.emissive.set(0x302520);
+        } else if (key === 'rock') {
+          impactorItem.mesh.material.color.set(0xaaaaaa);
+          impactorItem.mesh.material.emissive.set(0x202020);
+        } else if (key === 'iron') {
+          impactorItem.mesh.material.color.set(0xc0c6d0);
+          impactorItem.mesh.material.emissive.set(0x303030);
+        }
+      } catch {}
+      impactorItem.mesh.material.needsUpdate = true;
+    }
+  });
 
   const resumeHandler = () => {
     simulationPaused = false;
