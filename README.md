@@ -20,6 +20,29 @@ Whether you’re a **scientist**, **educator**, **student**, or **policy-maker**
 
 Follow these steps to set up the project locally.
 
+Before starting, make sure you have installed:
+
+- [Python 3.10+](https://www.python.org/downloads/)
+- [Node.js 18+ and npm](https://nodejs.org/)
+- [Git](https://git-scm.com/downloads)
+
+> 💡 *Tip: To check if they’re installed, run in your terminal:*
+> ```bash
+> python --version
+> npm --version
+> git --version
+> ```
+
+If Python is **not installed**:
+- 🐍 Go to [python.org/downloads](https://www.python.org/downloads/) and install the latest version.
+- During installation, **check the box** that says *“Add Python to PATH”*.
+- After that, you can verify:
+  ```bash
+  python --version
+
+  If npm is **not installed**:
+  npm install
+
 ### 1️⃣ Clone the repository
 
 git clone https://github.com/carmenqr/MeteorMadness.git
@@ -35,9 +58,6 @@ python -m venv env
 #### Activate (Linux/Mac)
 source env/bin/activate
 
-#### Activate (Windows)
-env\Scripts\activate
-
 #### Install dependencies
 pip install -r requirements.txt
 
@@ -51,9 +71,28 @@ python app.py
 ### 3️⃣ Set up the Frontend (React + Vite)
 open a new terminal
 cd front
-npm install
+npm ci
 
 #### Start the development server
 npm run dev
 you'll see VITE vX.Y.Z  ready
 Now open your browser at http://127.0.0.1:5173/
+
+
+## ✅ The app is now running locally!
+Backend → http://127.0.0.1:5000/
+
+Frontend → http://localhost:5173/
+
+You can now explore:
+
+🌌 3D orbits of asteroids
+
+☄️ Interactive impact simulations
+
+🌍 Mitigation scenarios
+
+
+Made with ❤️ by Orbit-ers
+NASA Space Apps Challenge — Meteor Madness 2025
+(AI-generated assistance used for documentation formatting)
