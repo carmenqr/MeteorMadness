@@ -55,7 +55,7 @@ function restoreHover(item) {
   item.pathLine.material.opacity = getBaseOrbitOpacity(item);
 }
 
-function _easeSmoothstep(u){ return u<=0?0:u>=1?1:u*u*(3-2*u); }
+function _easeSmoothstep(u) { return u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u); }
 
 function freezeSystem() {
   simulationPaused = true;
@@ -68,21 +68,21 @@ function resumeSystem() {
   window.dispatchEvent(new CustomEvent('sim:resume-orbits'));
 }
 
-function tweenCamera({camera, controls, fromPos, toPos, fromTarget, toTarget, duration = 900, onDone}) {
+function tweenCamera({ camera, controls, fromPos, toPos, fromTarget, toTarget, duration = 900, onDone }) {
   let raf, stop = false;
   const t0 = performance.now();
-  const ease = x => (x<0?0:x>1?1:x*x*(3-2*x));
-  function step(now){
+  const ease = x => (x < 0 ? 0 : x > 1 ? 1 : x * x * (3 - 2 * x));
+  function step(now) {
     if (stop) return;
-    const u = ease((now - t0)/duration);
+    const u = ease((now - t0) / duration);
     camera.position.lerpVectors(fromPos, toPos, u);
     if (controls) controls.target.lerpVectors(fromTarget, toTarget, u);
     camera.updateProjectionMatrix();
-    if (u >= 1){ onDone?.(); return; }
+    if (u >= 1) { onDone?.(); return; }
     raf = requestAnimationFrame(step);
   }
   raf = requestAnimationFrame(step);
-  return ()=>{ stop = true; cancelAnimationFrame(raf); };
+  return () => { stop = true; cancelAnimationFrame(raf); };
 }
 
 function startPinEarthToCorner({
@@ -106,10 +106,10 @@ function startPinEarthToCorner({
   const pI = impactorMesh.position.clone();
   const vCam = camera.position.clone().sub(pI);
   let startDist = vCam.length(); if (startDist < 1e-6) startDist = keepCameraDistance;
-  const dir = vCam.length() > 1e-6 ? vCam.clone().normalize() : new THREE.Vector3(0,0,1);
+  const dir = vCam.length() > 1e-6 ? vCam.clone().normalize() : new THREE.Vector3(0, 0, 1);
 
-  const upWorld = new THREE.Vector3(0,1,0);
-  const horiz = dir.clone(); horiz.y = 0; if (horiz.lengthSq()<1e-8) horiz.set(0,0,1); horiz.normalize();
+  const upWorld = new THREE.Vector3(0, 1, 0);
+  const horiz = dir.clone(); horiz.y = 0; if (horiz.lengthSq() < 1e-8) horiz.set(0, 0, 1); horiz.normalize();
   let startYaw = Math.atan2(horiz.x, horiz.z);
   const sideAxis = new THREE.Vector3().crossVectors(upWorld, horiz).normalize();
   const dot = THREE.MathUtils.clamp(dir.dot(horiz), -1, 1);
@@ -140,7 +140,7 @@ function startPinEarthToCorner({
     keepCameraDistance, earthScale, viewOffset,
     lockControls,
     t0: performance.now(),
-    dur: Math.max(0, transitionMs|0),
+    dur: Math.max(0, transitionMs | 0),
     startDist, targetDist: keepCameraDistance,
     startYaw, targetYaw,
     startPitch, targetPitch,
@@ -155,7 +155,7 @@ function startPinEarthToCorner({
     camera.lookAt(pI);
   }
 
-  camera.up.set(0,1,0);
+  camera.up.set(0, 1, 0);
   camera.updateMatrixWorld();
   camera.updateProjectionMatrix();
 }
@@ -184,7 +184,7 @@ function stopPinEarth() {
   _earthPin = null;
 }
 
-function restoreEarthScale(earthMesh){
+function restoreEarthScale(earthMesh) {
   if (earthMesh && earthMesh.userData?.__origScale) {
     earthMesh.scale.copy(earthMesh.userData.__origScale);
     delete earthMesh.userData.__origScale;
@@ -211,10 +211,10 @@ function restoreDefaultView({ smooth = false, duration = 700 } = {}) {
   const fromPos = cam.position.clone();
   const fromTarget = (ctr ? ctr.target.clone() : new THREE.Vector3());
   const t0 = performance.now();
-  const ease = x => (x<0?0:x>1?1:x*x*(3-2*x));
+  const ease = x => (x < 0 ? 0 : x > 1 ? 1 : x * x * (3 - 2 * x));
 
-  function step(now){
-    const u = ease((now - t0)/duration);
+  function step(now) {
+    const u = ease((now - t0) / duration);
     cam.position.lerpVectors(fromPos, toPos, u);
     if (ctr) ctr.target.lerpVectors(fromTarget, toTarget, u);
     cam.updateProjectionMatrix();
@@ -225,62 +225,119 @@ function restoreDefaultView({ smooth = false, duration = 700 } = {}) {
 }
 
 async function cargarAsteroides() {
+  // helper para normalizar columnas del CSV a tu formato
+  const normalizeRow = (r) => ({
+    id: r.id ?? null,
+    name: r.name ?? 'Asteroid',
+    hazardous: String(r.hazardous ?? '').trim().toLowerCase() === 'true' || r.hazardous === '1',
+    a: r.a != null ? Number(r.a) : null,
+    e: r.e != null ? Number(r.e) : null,
+    i: r.i != null ? Number(r.i) : null,
+    om: r.om != null ? Number(r.om) : null,
+    w: r.w != null ? Number(r.w) : null,
+    epoch: r.epoch != null ? Number(r.epoch) : null,
+    mean_anomaly_deg: r.mean_anomaly_deg != null ? Number(r.mean_anomaly_deg) : null,
+    M0: r.M0 != null ? Number(r.M0) : null,
+  });
+
+  // parser CSV minimalista (coma-separado, respeta comillas)
+  const parseCSV = (text) => {
+    // separación por líneas
+    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(Boolean);
+    if (lines.length === 0) return [];
+    const headers = lines[0].split(',').map(h => h.trim());
+    const rows = [];
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      // parseo simple con comillas
+      const cols = [];
+      let current = '', inQuotes = false;
+      for (let j = 0; j < line.length; j++) {
+        const ch = line[j];
+        if (ch === '"') {
+          if (inQuotes && line[j + 1] === '"') { current += '"'; j++; }
+          else inQuotes = !inQuotes;
+        } else if (ch === ',' && !inQuotes) {
+          cols.push(current);
+          current = '';
+        } else {
+          current += ch;
+        }
+      }
+      cols.push(current);
+      const obj = {};
+      headers.forEach((h, idx) => obj[h] = (cols[idx] ?? '').trim());
+      rows.push(obj);
+    }
+    return rows;
+  };
+
+  // 1) intenta backend relativo (sirve CSV si existe)
   try {
-    const res = await fetch("http://127.0.0.1:5000/api/asteroides");
+    const res = await fetch("/api/asteroides", { credentials: "same-origin" });
     if (!res.ok) throw new Error(`API responded ${res.status}`);
     const data = await res.json();
     asteroides = Array.isArray(data) ? data : (data.items || []);
-    console.log(`Loaded ${asteroides.length} asteroids from backend`);
+    console.log(`Loaded ${asteroides.length} asteroids from /api/asteroides`);
 
-    const yaExisteImpactor = asteroides.some(a => /impactor[- ]?2025/i.test(a.name));
-    if (!yaExisteImpactor) {
-      const impactor2025 = {
-        name: "Impactor2025",
-        a: 1.20,
-        e: 0.15,
-        i: 25.0,
-        om: 80.0,
-        w: 45.0,
-        M0: 0.0,
-        epoch: 2461000.5
-      };
-      asteroides.push(impactor2025);
-      console.log("Añadido Impactor2025 con órbita propia:", impactor2025);
-    }
-
+  } catch (e1) {
+    console.warn("Fallo /api/asteroides, probando /asteroides.csv …", e1);
+    // 2) intenta CSV estático desde public
     try {
-      const resEarth = await fetch("http://127.0.0.1:5000/api/earth");
-      if (resEarth.ok) {
-        const d = await resEarth.json();
-        earthData = Array.isArray(d) ? d[0] : d;
-        if (!earthData?.name) earthData.name = "Earth";
-        console.log("Earth loaded:", earthData);
-      } else {
-        console.warn("No se pudo cargar /api/earth:", resEarth.status);
+      const r2 = await fetch("/asteroids.csv");
+      if (!r2.ok) throw new Error(`CSV responded ${r2.status}`);
+      const txt = await r2.text();
+      const rows = parseCSV(txt);
+      asteroides = rows.map(normalizeRow);
+      console.log(`Loaded ${asteroides.length} asteroids from /asteroides.csv`);
+    } catch (e2) {
+      console.warn("Fallo /asteroides.csv, probando mock local …", e2);
+      // 3) mock local
+      try {
+        const local = await fetch('./mock/asteroides_mock.json');
+        if (!local.ok) throw new Error(`Local mock responded ${local.status}`);
+        asteroides = await local.json();
+        console.log(`Loaded ${asteroides.length} asteroids from local mock`);
+      } catch (e3) {
+        console.error('No se pudieron cargar asteroides (API/CSV/mock).', e3);
+        const info = document.getElementById('info-panel') || document.createElement('div');
+        info.id = 'info-panel';
+        Object.assign(info.style, { position: 'fixed', top: '12px', left: '12px', padding: '12px', background: 'rgba(0,0,0,0.85)', color: '#fff', zIndex: 50 });
+        info.innerText = 'No se han podido cargar datos de los asteroides. Sube /asteroides.csv al public o inicia el backend.';
+        document.body.appendChild(info);
       }
-    } catch (e) {
-      console.warn("Error cargando /api/earth:", e);
-    }
-
-  } catch (error) {
-    console.warn("No se pudo cargar asteroides desde backend, intentando mock local. Error:", error);
-    try {
-      const local = await fetch('./mock/asteroides_mock.json');
-      if (!local.ok) throw new Error(`Local mock responded ${local.status}`);
-      asteroides = await local.json();
-      console.log(`Loaded ${asteroides.length} asteroids from local mock`);
-
-    } catch (err2) {
-      console.error('Fallo al cargar mock local:', err2);
-      const info = document.getElementById('info-panel') || document.createElement('div');
-      info.id = 'info-panel';
-      Object.assign(info.style, {position: 'fixed', top: '12px', left: '12px', padding: '12px', background: 'rgba(0,0,0,0.85)', color: '#fff', zIndex: 50});
-      info.innerText = 'No se han podido cargar datos de los asteroides. Inicia el backend o comprueba la ruta de los archivos.';
-      document.body.appendChild(info);
-      console.error('No se pudieron cargar asteroides desde backend ni desde mock local.');
     }
   }
+
+  // Impactor2025 de cortesía si no viene en CSV
+  const yaExisteImpactor = asteroides.some(a => /impactor[- ]?2025/i.test(a.name));
+  if (!yaExisteImpactor) {
+    const impactor2025 = {
+      name: "Impactor2025",
+      a: 1.20, e: 0.15, i: 25.0, om: 80.0, w: 45.0, M0: 0.0, epoch: 2461000.5, hazardous: true
+    };
+    asteroides.push(impactor2025);
+  }
+
+  try {
+    const resEarth = await fetch("/api/earth", { credentials: "same-origin" });
+    if (resEarth.ok) {
+      const d = await resEarth.json();
+      earthData = Array.isArray(d) ? d[0] : d;
+      if (!earthData?.name) earthData.name = "Earth";
+    } else {
+      console.warn("No se pudo cargar /api/earth:", resEarth.status);
+    }
+  } catch (e) {
+    console.warn("Error cargando /api/earth; usando valores por defecto.", e);
+    earthData = {
+      id: "earth", name: "Earth", hazardous: false,
+      a: 1.00000011, e: 0.01671022, i: 0.00005, om: -11.26064, w: 102.94719,
+      epoch: 2451545.0, mean_anomaly_deg: 100.46435, M0: 0.9856076686
+    };
+  }
 }
+
 
 function addListener(target, type, handler, opts) {
   target.addEventListener(type, handler, opts);
@@ -768,13 +825,13 @@ function iniciarSimulacion(mountEl) {
 
   const texLoader = new THREE.TextureLoader();
   const maxAniso = renderer.capabilities.getMaxAnisotropy?.() ?? 1;
-  const earthTex = texLoader.load(earthUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); });
-  const asteroidTex = texLoader.load(asteroidUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); });
+  const earthTex = texLoader.load(earthUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8, maxAniso); });
+  const asteroidTex = texLoader.load(asteroidUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8, maxAniso); });
   const impactorMaterialTextures = {
-    ice: texLoader.load(iceUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); }),
-    porous_rock: texLoader.load(porousRockUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); }),
-    rock: texLoader.load(rockUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); }),
-    iron: texLoader.load(ironUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8,maxAniso); })
+    ice: texLoader.load(iceUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8, maxAniso); }),
+    porous_rock: texLoader.load(porousRockUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8, maxAniso); }),
+    rock: texLoader.load(rockUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8, maxAniso); }),
+    iron: texLoader.load(ironUrl, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8, maxAniso); })
   };
 
   if (earthData) {
@@ -793,7 +850,7 @@ function iniciarSimulacion(mountEl) {
 
       const earthPts = getOrbitPoints(earthData, 512);
       const pathGeomE = new THREE.BufferGeometry().setFromPoints(earthPts);
-      const pathMatE = new THREE.LineBasicMaterial({ color: 0x2b6fff, transparent: true, opacity: 0.6, depthWrite:false });
+      const pathMatE = new THREE.LineBasicMaterial({ color: 0x2b6fff, transparent: true, opacity: 0.6, depthWrite: false });
       const pathLineE = new THREE.Line(pathGeomE, pathMatE);
       pathLineE.frustumCulled = false;
       scene.add(pathLineE, meshE);
@@ -810,7 +867,7 @@ function iniciarSimulacion(mountEl) {
         mesh: meshE, obj: earthData, pathLine: pathLineE, pathGeom: pathGeomE, labelEl: labelE
       });
       setLabelMode(earthItem, 'auto');
-    } catch(e){ console.warn('Earth fail', e); }
+    } catch (e) { console.warn('Earth fail', e); }
   }
 
   for (const obj of asteroides) {
@@ -824,7 +881,7 @@ function iniciarSimulacion(mountEl) {
 
     const orbitPts = getOrbitPoints(obj, 512);
     const pathGeom = new THREE.BufferGeometry().setFromPoints(orbitPts);
-    const pathMat  = new THREE.LineBasicMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.25, depthWrite:false });
+    const pathMat = new THREE.LineBasicMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.25, depthWrite: false });
     const pathLine = new THREE.Line(pathGeom, pathMat);
     pathLine.frustumCulled = false;
     scene.add(pathLine, mesh);
@@ -844,7 +901,7 @@ function iniciarSimulacion(mountEl) {
   }
 
   if (window.__astralDropdown) {
-    const items = [...asteroidMeshes].sort((a,b) => (a.mesh.name||'').localeCompare(b.mesh.name||''));
+    const items = [...asteroidMeshes].sort((a, b) => (a.mesh.name || '').localeCompare(b.mesh.name || ''));
     const options = [
       { value: '__all', label: 'All objects' },
       ...items.map(it => ({ value: it.mesh.name, label: it.mesh.name }))
@@ -862,7 +919,7 @@ function iniciarSimulacion(mountEl) {
         impactorItem.pathLine.material.transparent = true;
         impactorItem.pathLine.material.opacity = 0.4;
       }
-    } catch {}
+    } catch { }
 
     const openPanelHandler = () => {
       isolateKeep([impactorItem, earthItem], asteroidMeshes);
@@ -914,7 +971,7 @@ function iniciarSimulacion(mountEl) {
             impactorItem.mesh.material.color.set(0xc0c6d0);
             impactorItem.mesh.material.emissive.set(0x303030);
           }
-        } catch {}
+        } catch { }
         impactorItem.mesh.material.needsUpdate = true;
       }
     });
@@ -940,7 +997,7 @@ function iniciarSimulacion(mountEl) {
     mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
-    const targets = (isolatedItem ? [isolatedItem.mesh] : asteroidMeshes.filter(i=>i.mesh.visible).map(i => i.mesh));
+    const targets = (isolatedItem ? [isolatedItem.mesh] : asteroidMeshes.filter(i => i.mesh.visible).map(i => i.mesh));
     raycaster.setFromCamera(mouse, camera);
     const hit = raycaster.intersectObjects(targets, false)[0];
     if (!hit) return;
@@ -995,118 +1052,118 @@ function iniciarSimulacion(mountEl) {
 
   let lastFrameMsLocal = performance.now();
   function animate() {
-      _frameId = requestAnimationFrame(animate);
-      const now = performance.now();
-      const dt = now - lastFrameMsLocal;
-      lastFrameMsLocal = now;
+    _frameId = requestAnimationFrame(animate);
+    const now = performance.now();
+    const dt = now - lastFrameMsLocal;
+    lastFrameMsLocal = now;
 
-      if (!simulationPaused && !tabHidden) {
-          simDays += (dt/1000)*TIME_SCALE;
-      }
-      const tJulian = baseJulian + simDays;
-
-      for (const item of asteroidMeshes) {
-        if (!simulationPaused && !tabHidden) {
-          const { pos } = propagate(item.obj, tJulian);
-          item.mesh.position.copy(pos);
-        }
-        if (item.labelEl) {
-          const mode = getLabelMode(item);
-          if (mode === 'hide') {
-            item.labelEl.style.display = 'none';
-          } else {
-            const sp = item.mesh.position.clone().project(camera);
-            const onScreen = (sp.z < 1) && (sp.x > -1.1 && sp.x < 1.1) && (sp.y > -1.1 && sp.y < 1.1);
-            if (onScreen) {
-              const x = (sp.x * 0.5 + 0.5) * window.innerWidth;
-              const y = (-sp.y * 0.5 + 0.5) * window.innerHeight;
-              item.labelEl.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
-              item.labelEl.style.display = 'block';
-            } else {
-              item.labelEl.style.display = 'none';
-            }
-          }
-        }
-      }
-
-      if (_earthPin) {
-        const S = _earthPin;
-        const { impactorMesh, earthMesh, camera, controls } = S;
-        if (impactorMesh?.position && earthMesh?.position) {
-          const now = performance.now();
-          const u = S.dur > 0 ? _easeSmoothstep(Math.min(1, (now - S.t0) / S.dur)) : 1;
-
-          if (S.orbits?.length) {
-            for (const ln of S.orbits) {
-              if (!ln?.material) continue;
-              const mat = ln.material;
-              const orig = typeof mat.userData?.__origOpacity === 'number' ? mat.userData.__origOpacity : (mat.opacity ?? 1);
-              mat.opacity = (1 - u) * orig;
-              if (u >= 1 && !S.fadedDone) { ln.visible = false; }
-            }
-            if (u >= 1) S.fadedDone = true;
-          }
-
-          const pI = impactorMesh.position;
-          if (controls) controls.target.copy(pI);
-
-          const dist = THREE.MathUtils.lerp(S.startDist, S.targetDist, u);
-
-            const yaw = THREE.MathUtils.lerp(S.startYaw, S.targetYaw, u);
-            const pitch = THREE.MathUtils.lerp(S.startPitch, S.targetPitch, u);
-
-          const baseDir = new THREE.Vector3(0, 0, 1);
-          const upWorld = new THREE.Vector3(0,1,0);
-          const qYaw = new THREE.Quaternion().setFromAxisAngle(upWorld, yaw);
-          const dirYaw = baseDir.clone().applyQuaternion(qYaw);
-          const side = new THREE.Vector3().crossVectors(upWorld, dirYaw).normalize();
-          const qPitch = new THREE.Quaternion().setFromAxisAngle(side, pitch);
-          const dirFinal = dirYaw.clone().applyQuaternion(qPitch).normalize();
-
-          camera.position.copy(pI.clone().add(dirFinal.multiplyScalar(dist)));
-          camera.up.set(0,1,0);
-          camera.updateMatrixWorld();
-          camera.updateProjectionMatrix();
-
-          const scaleNow = THREE.MathUtils.lerp(S.startEarthScale, S.earthScale, u);
-          earthMesh.scale.setScalar(scaleNow);
-
-          const pI_cam = pI.clone().applyMatrix4(camera.matrixWorldInverse);
-          const impactorDepth = Math.max(1e-4, -pI_cam.z);
-          const depth = Number.isFinite(S.earthDepthFactor)
-            ? Math.max(1e-4, impactorDepth * S.earthDepthFactor)
-            : Math.max(1e-4, impactorDepth + (S.depthOffset ?? 0.2));
-
-          const fovY = (camera.fov ?? 50) * Math.PI/180;
-          const tanY = Math.tan(fovY/2);
-          const tanX = tanY * (camera.aspect || (window.innerWidth / Math.max(1, window.innerHeight)));
-          const desiredX_cam = (S.targetNDC.x) * tanX * depth;
-          const desiredY_cam = (S.targetNDC.y) * tanY * depth;
-          const desiredZ_cam = -depth;
-
-          const desired_cam = new THREE.Vector3(desiredX_cam, desiredY_cam, desiredZ_cam);
-          const desired_world = desired_cam.applyMatrix4(camera.matrixWorld);
-          earthMesh.position.copy(desired_world);
-        }
-      }
-
-      controls.update();
-      renderer.render(scene, camera);
+    if (!simulationPaused && !tabHidden) {
+      simDays += (dt / 1000) * TIME_SCALE;
     }
-    animate();
+    const tJulian = baseJulian + simDays;
 
-    _resizeHandler = () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
+    for (const item of asteroidMeshes) {
+      if (!simulationPaused && !tabHidden) {
+        const { pos } = propagate(item.obj, tJulian);
+        item.mesh.position.copy(pos);
+      }
+      if (item.labelEl) {
+        const mode = getLabelMode(item);
+        if (mode === 'hide') {
+          item.labelEl.style.display = 'none';
+        } else {
+          const sp = item.mesh.position.clone().project(camera);
+          const onScreen = (sp.z < 1) && (sp.x > -1.1 && sp.x < 1.1) && (sp.y > -1.1 && sp.y < 1.1);
+          if (onScreen) {
+            const x = (sp.x * 0.5 + 0.5) * window.innerWidth;
+            const y = (-sp.y * 0.5 + 0.5) * window.innerHeight;
+            item.labelEl.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
+            item.labelEl.style.display = 'block';
+          } else {
+            item.labelEl.style.display = 'none';
+          }
+        }
+      }
+    }
+
+    if (_earthPin) {
+      const S = _earthPin;
+      const { impactorMesh, earthMesh, camera, controls } = S;
+      if (impactorMesh?.position && earthMesh?.position) {
+        const now = performance.now();
+        const u = S.dur > 0 ? _easeSmoothstep(Math.min(1, (now - S.t0) / S.dur)) : 1;
+
+        if (S.orbits?.length) {
+          for (const ln of S.orbits) {
+            if (!ln?.material) continue;
+            const mat = ln.material;
+            const orig = typeof mat.userData?.__origOpacity === 'number' ? mat.userData.__origOpacity : (mat.opacity ?? 1);
+            mat.opacity = (1 - u) * orig;
+            if (u >= 1 && !S.fadedDone) { ln.visible = false; }
+          }
+          if (u >= 1) S.fadedDone = true;
+        }
+
+        const pI = impactorMesh.position;
+        if (controls) controls.target.copy(pI);
+
+        const dist = THREE.MathUtils.lerp(S.startDist, S.targetDist, u);
+
+        const yaw = THREE.MathUtils.lerp(S.startYaw, S.targetYaw, u);
+        const pitch = THREE.MathUtils.lerp(S.startPitch, S.targetPitch, u);
+
+        const baseDir = new THREE.Vector3(0, 0, 1);
+        const upWorld = new THREE.Vector3(0, 1, 0);
+        const qYaw = new THREE.Quaternion().setFromAxisAngle(upWorld, yaw);
+        const dirYaw = baseDir.clone().applyQuaternion(qYaw);
+        const side = new THREE.Vector3().crossVectors(upWorld, dirYaw).normalize();
+        const qPitch = new THREE.Quaternion().setFromAxisAngle(side, pitch);
+        const dirFinal = dirYaw.clone().applyQuaternion(qPitch).normalize();
+
+        camera.position.copy(pI.clone().add(dirFinal.multiplyScalar(dist)));
+        camera.up.set(0, 1, 0);
+        camera.updateMatrixWorld();
         camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    };
-    addListener(window, 'resize', _resizeHandler);
 
-    _visibilityHandler = () => {
-        tabHidden = document.hidden;
-        if (!tabHidden) lastFrameMs = performance.now();
-    };
-    addListener(document, 'visibilitychange', _visibilityHandler);
+        const scaleNow = THREE.MathUtils.lerp(S.startEarthScale, S.earthScale, u);
+        earthMesh.scale.setScalar(scaleNow);
+
+        const pI_cam = pI.clone().applyMatrix4(camera.matrixWorldInverse);
+        const impactorDepth = Math.max(1e-4, -pI_cam.z);
+        const depth = Number.isFinite(S.earthDepthFactor)
+          ? Math.max(1e-4, impactorDepth * S.earthDepthFactor)
+          : Math.max(1e-4, impactorDepth + (S.depthOffset ?? 0.2));
+
+        const fovY = (camera.fov ?? 50) * Math.PI / 180;
+        const tanY = Math.tan(fovY / 2);
+        const tanX = tanY * (camera.aspect || (window.innerWidth / Math.max(1, window.innerHeight)));
+        const desiredX_cam = (S.targetNDC.x) * tanX * depth;
+        const desiredY_cam = (S.targetNDC.y) * tanY * depth;
+        const desiredZ_cam = -depth;
+
+        const desired_cam = new THREE.Vector3(desiredX_cam, desiredY_cam, desiredZ_cam);
+        const desired_world = desired_cam.applyMatrix4(camera.matrixWorld);
+        earthMesh.position.copy(desired_world);
+      }
+    }
+
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  _resizeHandler = () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  };
+  addListener(window, 'resize', _resizeHandler);
+
+  _visibilityHandler = () => {
+    tabHidden = document.hidden;
+    if (!tabHidden) lastFrameMs = performance.now();
+  };
+  addListener(document, 'visibilitychange', _visibilityHandler);
 }
 
 function _internalCleanup(mountEl) {
@@ -1114,7 +1171,7 @@ function _internalCleanup(mountEl) {
   if (_frameId) cancelAnimationFrame(_frameId);
   _frameId = null;
 
-  _listeners.splice(0).forEach(fn => { try { fn(); } catch {} });
+  _listeners.splice(0).forEach(fn => { try { fn(); } catch { } });
 
   _domNodes.forEach(n => { if (n?.parentNode) n.parentNode.removeChild(n); });
   _domNodes.clear();
@@ -1149,7 +1206,7 @@ export function stopHomeSimulation(mountEl) {
 
 function _hasAliveRenderer(mountEl) {
   return !!(_sceneRefs?.renderer && _sceneRefs.renderer.domElement &&
-            _sceneRefs.renderer.domElement.parentNode === mountEl);
+    _sceneRefs.renderer.domElement.parentNode === mountEl);
 }
 
 export async function runHomeSimulation(mountEl) {
@@ -1168,7 +1225,7 @@ export async function runHomeSimulation(mountEl) {
   } catch (e) {
     console.error('No se pudo iniciar la simulación:', e);
     _internalCleanup(mountEl);
-    return () => {};
+    return () => { };
   }
 
   return () => _internalCleanup(mountEl);

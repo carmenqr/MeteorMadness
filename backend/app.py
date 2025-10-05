@@ -7,6 +7,8 @@ from urllib.parse import urlparse
 NASA_API = "https://api.nasa.gov/neo/rest/v1/neo/browse"
 API_KEY  = os.getenv("NASA_API_KEY", "DEMO_KEY")
 
+ASTEROIDS_CSV_PATH = os.getenv("ASTEROIDS_CSV_PATH", os.path.join(os.path.dirname(__file__), "data", "asteroids.csv"))
+
 app = Flask(__name__)
 CORS(app)
 
@@ -28,6 +30,28 @@ def map_neo_object(o: dict) -> dict:
         "mean_anomaly_deg": f(orb.get("mean_anomaly")),
         "M0": f(orb.get("mean_motion")),
     }
+
+def load_asteroids_from_csv(csv_path: str) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    if not os.path.isfile(csv_path):
+        return items
+    with open(csv_path, "r", newline="", encoding="utf-8") as f:
+        r = csv.DictReader(f)
+        for row in r:
+            items.append({
+                "id": row.get("id") or None,
+                "name": row.get("name") or None,
+                "hazardous": str(row.get("hazardous", "")).strip().lower() in ("1","true","yes","y","t"),
+                "a": f(row.get("a")),
+                "e": f(row.get("e")),
+                "i": f(row.get("i")),
+                "om": f(row.get("om")),
+                "w": f(row.get("w")),
+                "epoch": f(row.get("epoch")),
+                "mean_anomaly_deg": f(row.get("mean_anomaly_deg")),
+                "M0": f(row.get("M0")),
+            })
+    return items
 
 def fetch_browse_page(page: int, size: int) -> List[Dict[str, Any]]:
     """Llama a /neo/browse para una página y devuelve SOLO la lista de NEOs mapeados."""
@@ -69,9 +93,11 @@ def get_neos():
     # Sin metadatos de paginación: solo lo que necesita el front
     return jsonify({"count": len(all_items), "items": all_items})
 
-# Alias para el front: mismo resultado que /api/neos
 @app.route("/api/asteroides", methods=["GET"])
 def get_asteroides():
+    items = load_asteroids_from_csv(ASTEROIDS_CSV_PATH)
+    if items:
+        return jsonify({"count": len(items), "items": items})
     return get_neos()
 
 def get_earth_orbit_json():
