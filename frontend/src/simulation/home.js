@@ -387,26 +387,77 @@ function ensureUI() {
     });
     document.body.appendChild(labels);
   }
+  // Contenedor botón (bottom-left)
   if (!document.getElementById('btn-start')) {
-    const topbar = registerNode(document.createElement('div'));
-    Object.assign(topbar.style, {
-      position: 'fixed', top: '12px', right: '12px', zIndex: 30, pointerEvents: 'auto'
-    });
     const btn = document.createElement('button');
     btn.id = 'btn-start';
     btn.textContent = 'Start simulation';
     Object.assign(btn.style, {
-      padding: '8px 12px', borderRadius: '10px',
-      border: '1px solid #ffffff22', background: '#1d4ed8',
-      color: '#fff', cursor: 'pointer'
+      position: 'fixed', bottom: '16px', left: '16px', zIndex: 30,
+      padding: '10px 16px', borderRadius: '12px',
+      border: '1px solid #2563eb', background: '#1d4ed8',
+      color: '#fff', cursor: 'pointer', fontSize: '14px', fontWeight: '600',
+      boxShadow: '0 4px 14px rgba(0,0,0,0.35)', letterSpacing: '.3px'
     });
     btn.addEventListener('click', () => {
       simulationPaused = true;
       window.dispatchEvent(new CustomEvent('sim:pause-orbits'));
       window.dispatchEvent(new CustomEvent('sim:open-panel'));
+      btn.style.display = 'none';
     });
-    topbar.appendChild(btn);
-    document.body.appendChild(topbar);
+    document.body.appendChild(registerNode(btn));
+
+    // Re-aparecer botón al reset si no hay panel abierto
+    window.addEventListener('sim:resume-orbits', () => {
+      const b = document.getElementById('btn-start');
+      if (b) b.style.display = 'block';
+    });
+  }
+
+  // Contenedor dropdown (top-right)
+  if (!document.getElementById('asteroid-select')) {
+    const wrap = registerNode(document.createElement('div'));
+    Object.assign(wrap.style, {
+      position: 'fixed', top: '12px', right: '12px', zIndex: 30,
+      display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px',
+      pointerEvents: 'auto', fontFamily: 'system-ui, sans-serif'
+    });
+    const labelSel = document.createElement('label');
+    labelSel.textContent = 'Asteroids:';
+    Object.assign(labelSel.style, { fontSize: '11px', fontWeight: '600', color: '#fff', textShadow:'0 1px 2px #000' });
+    const sel = document.createElement('select');
+    sel.id = 'asteroid-select';
+    Object.assign(sel.style, {
+      padding: '6px 8px', borderRadius: '8px', background: 'rgba(0,0,0,0.55)', color: '#fff',
+      border: '1px solid #ffffff33', cursor: 'pointer', fontSize: '12px'
+    });
+    sel.innerHTML = '<option value="__loading" disabled selected>Loading…</option>';
+
+    sel.addEventListener('change', (e) => {
+      const v = e.target.value;
+      const list = window.__asteroidMeshes || [];
+      if (v === '__all') {
+        resetIsolation(list);
+        stopPinEarth();
+        restoreEarthScale(earthItem?.mesh || null);
+        restoreDefaultView({ smooth: true, duration: 600 });
+        resumeSystem();
+        return;
+      }
+      const item = list.find(i => (i.mesh?.name || '').toLowerCase() === v.toLowerCase());
+      if (!item) return;
+      if (/impactor[- ]?2025/i.test(item.mesh.name)) {
+        simulationPaused = true;
+        window.dispatchEvent(new CustomEvent('sim:pause-orbits'));
+        window.dispatchEvent(new CustomEvent('sim:open-panel'));
+        const b = document.getElementById('btn-start'); if (b) b.style.display = 'none';
+        return;
+      }
+      isolate(item, list);
+    });
+    wrap.appendChild(labelSel);
+    wrap.appendChild(sel);
+    document.body.appendChild(wrap);
   }
 }
 
@@ -466,13 +517,26 @@ function resetIsolation(listRef) {
 }
 
 //PARA EL PANEL LATERAL DE INFO
-onPanelReset(() => {
-  stopPinEarth();
-  resetIsolation();
-  restoreEarthScale(earthItem?.mesh || null);
-  restoreDefaultView({ smooth: true, duration: 1000 });
-  resumeSystem();
-});
+// Registro diferido del handler de reset del panel (se reinsertará en cada iniciarSimulacion)
+let _panelResetUnsub = null;
+function registerPanelResetHandler() {
+  // Si hay uno previo no hace falta; destroyInfoPanel lo borra cuando se desmonta
+  if (_panelResetUnsub) return;
+  const cb = () => {
+    // Restaurar estado visual/cámara
+    stopPinEarth();
+    resetIsolation();
+    restoreEarthScale(earthItem?.mesh || null);
+    restoreDefaultView({ smooth: true, duration: 1000 });
+    resumeSystem();
+    // Reaparecer botón start (por si no lo hace el listener global)
+    const b = document.getElementById('btn-start');
+    if (b) b.style.display = 'block';
+  };
+  onPanelReset(cb);
+  // Guardamos un pseudo unsub (no expuesto directamente por panel, pero podremos reinicializar tras cleanup poniéndolo a null)
+  _panelResetUnsub = () => { _panelResetUnsub = null; };
+}
 
 // ———————————————————————————————————————
 // Simulación
@@ -480,6 +544,7 @@ onPanelReset(() => {
 function iniciarSimulacion(mountEl) {
   ensureUI();
   initInfoPanel();
+  registerPanelResetHandler();
 
   const { scene, camera, renderer, controls } = createScene(mountEl);
   _sceneRefs = { scene, camera, renderer, controls };
@@ -572,6 +637,27 @@ function iniciarSimulacion(mountEl) {
     asteroidMeshes.push({ mesh, obj, pathLine, pathGeom, labelEl: label });
   }
 
+  // Rellenar dropdown ahora que tenemos asteroidMeshes
+  const sel = document.getElementById('asteroid-select');
+  if (sel) {
+    const items = [...asteroidMeshes];
+    // Orden alfabético por nombre
+    items.sort((a,b) => (a.mesh.name||'').localeCompare(b.mesh.name||''));
+    sel.innerHTML = '';
+    const optAll = document.createElement('option');
+    optAll.value = '__all';
+    optAll.textContent = 'All objects';
+    sel.appendChild(optAll);
+    for (const it of items) {
+      const o = document.createElement('option');
+      o.value = it.mesh.name;
+      o.textContent = it.mesh.name;
+      sel.appendChild(o);
+    }
+    // Seleccionar placeholder inicial
+    sel.value = '__all';
+  }
+
   // ——— IMPACTOR2025: localizar, destacar y preparar aislamiento + pausa al abrir panel ———
   const impactorItem = asteroidMeshes.find(i => /impactor[- ]?2025/i.test(i.mesh.name));
   if (impactorItem) {
@@ -644,6 +730,8 @@ function iniciarSimulacion(mountEl) {
       simulationPaused = true;
       window.dispatchEvent(new CustomEvent('sim:pause-orbits'));
       window.dispatchEvent(new CustomEvent('sim:open-panel'));
+      const b = document.getElementById('btn-start');
+      if (b) b.style.display = 'none';
       return;
     }
 
@@ -805,6 +893,8 @@ function _internalCleanup(mountEl) {
   _sceneRefs = null;
   resetModuleState();
   _running = false;
+  // Permitir re-registro del handler de panel en próxima simulación
+  _panelResetUnsub = null;
 }
 
 // Export opcional por si quieres forzar un stop manual desde consola
