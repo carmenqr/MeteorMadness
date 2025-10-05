@@ -1,5 +1,5 @@
 // src/pages/Mitigation.jsx
-import React from "react";
+import React, { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 // Si usas bundler que soporta import de assets:
@@ -7,9 +7,21 @@ import deflectionImg from "../assets/deflection.png";
 import nuclearImg from "../assets/nucleardestruction.png";
 import laserImg from "../assets/laser.png";
 import evacuationImg from "../assets/evacuation.png";
+import { mascotSay } from "../utils/mascotBus";
+import alivado from '../assets/aliviado.png'
 
 export default function Mitigation() {
   const navigate = useNavigate();
+
+  useEffect(() => {
+    mascotSay("We’re glad you’ve chosen to mitigate the asteroid impact!");
+
+    const timer = setTimeout(() => {
+      mascotSay("Below are established strategies studied in planetary defense. Click each card to expand.");
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   return (
     <div style={styles.page}>
@@ -19,13 +31,6 @@ export default function Mitigation() {
           Back to Home
         </button>
       </header>
-
-      <section style={styles.leadWrap}>
-        <p style={styles.lead}>
-          <strong>We’re glad you’ve chosen to mitigate the asteroid impact!</strong>&nbsp;
-          Below are established strategies studied in planetary defense. Click each card to expand.
-        </p>
-      </section>
 
       <main style={styles.main}>
         <AccordionCard
@@ -117,8 +122,20 @@ export default function Mitigation() {
 /* ---------- Reusable Components ---------- */
 
 function AccordionCard({ title, summary, image, children, facts = [] }) {
+  const onToggle = (e) => {
+    if (e.currentTarget.open) {
+      const msgMap = {
+        "Deflection (Kinetic Impactor)": "Small push, big change — if you start early.",
+        "Nuclear Disruption": "Powerful last resort — mind debris & policy.",
+        "Laser Ablation": "Slow but precise; needs lots of power.",
+        "Failure to Mitigate / Civil Protection": "Protect people first: alerts, shelters, evacuation.",
+      };
+      mascotSay(msgMap[title] || `Opened: ${title}`);
+    }
+  };
+
   return (
-    <details style={styles.card}>
+    <details style={styles.card} onToggle={onToggle}>
       <summary style={styles.cardSummary}>
         <div style={styles.summaryText}>
           <h2 style={styles.cardTitle}>{title}</h2>
@@ -131,8 +148,6 @@ function AccordionCard({ title, summary, image, children, facts = [] }) {
         <div style={styles.cardMedia}>{image}</div>
         <div style={styles.cardContent}>
           {children}
-
-          {/* ahora las facts están dentro, al final de la parte de texto */}
           {facts.length > 0 && (
             <KeyFacts facts={facts} />
           )}
@@ -141,7 +156,6 @@ function AccordionCard({ title, summary, image, children, facts = [] }) {
     </details>
   );
 }
-
 
 function KeyFacts({ facts }) {
   return (
@@ -156,7 +170,6 @@ function KeyFacts({ facts }) {
   );
 }
 
-// Componente de imagen reutilizable
 function ImgCard({ src, alt }) {
   return (
     <img
@@ -265,7 +278,6 @@ const styles = {
     opacity: 0.8,
     transition: "transform .2s ease",
   },
-  /* FACTS styles */
   factsWrap: {
     marginTop: 12,
     display: "grid",
@@ -325,9 +337,3 @@ const styles = {
     opacity: 0.7,
   },
 };
-
-/* Tip:
-   <details> toggles natively. If you want the chevron to rotate when open,
-   move styles to a CSS file and add:
-   details[open] summary span { transform: rotate(180deg); }
-*/

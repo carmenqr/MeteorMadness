@@ -1,0 +1,118 @@
+/* =========================================================
+   BUBBLE BLACK
+   ========================================================= */
+
+.Mascot_wrap {
+    position: relative;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    pointer-events: none;
+}
+
+.Mascot_wrap--bubble-right {
+    flex-direction: row-reverse;
+}
+
+/* =========================================================
+   TEXT
+   ========================================================= */
+.Mascot_bubble {
+    position: static;
+    width: auto;
+    max-width: min(46vw, 380px);
+    background: rgba(10, 10, 10, 0.92);
+    color: #ffffff;
+    border: 1.5px solid rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    padding: 12px 16px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+    pointer-events: auto;
+
+    /* La animación ya no toca transform para no pisar nudges */
+    animation: bubbleFade 160ms ease-out;
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+}
+
+.Mascot_bubble::after {
+    display: none;
+    /* sin piquito */
+}
+
+.Mascot_bubble p {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.35;
+    font-family: "Press Start 2P", monospace;
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+    letter-spacing: 0.3px;
+    word-break: break-word;
+    text-align: left;
+}
+
+@keyframes bubbleFade {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+/* =========================================================
+   ROBOT (sprite)
+   ========================================================= */
+.Mascot_sprite {
+    display: block;
+    image-rendering: pixelated;
+    /* nitidez pixel art */
+    image-rendering: -moz-crisp-edges;
+    /* Firefox */
+    image-rendering: crisp-edges;
+    /* Fallback */
+    -ms-interpolation-mode: nearest-neighbor;
+    /* Edge Legacy */
+    transform-origin: bottom center;
+    animation: mascotFloat 2.2s ease-in-out infinite;
+    pointer-events: none;
+    filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.35)) drop-shadow(0 0 10px rgba(0, 255, 255, 0.2));
+}
+
+.Mascot_sprite.glow-soft {
+    filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.3)) drop-shadow(0 0 6px rgba(0, 255, 255, 0.18));
+}
+
+@keyframes mascotFloat {
+    0% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-2px);
+    }
+
+    100% {
+        transform: translateY(0);
+    }
+}
+
+
+@media (max-width: 500px) {
+    .Mascot_wrap {
+        flex-direction: column;
+        align-items: flex-end;
+        row-gap: 8px;
+    }
+
+    .Mascot_bubble {
+        max-width: 88vw;
+        padding: 10px 12px;
+    }
+
+    .Mascot_bubble p {
+        font-size: 13px;
+        line-height: 1.3;
+    }
+}

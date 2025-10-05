@@ -1,6 +1,8 @@
 import * as THREE from 'three'; // si ya estaba, mantener; si no se usa puedes quitarlo
 // src/home-panel.js
 // Self-contained side panel for asteroid/planet info with didactic explanations
+import { mascotSay } from "../utils/mascotBus.js";
+
 
 let panelEl = null;
 let panelStyleEl = null;
@@ -31,7 +33,7 @@ export function offPanelReset(fn) { resetHandlers.delete(fn); }
 export function offImpactorChange(fn) { impactorListeners.delete(fn); }
 
 function emitImpactorChange() {
-  for (const fn of impactorListeners) { try { fn({ ...impactorState }); } catch {} }
+  for (const fn of impactorListeners) { try { fn({ ...impactorState }); } catch { } }
 }
 
 function ensurePanel() {
@@ -150,45 +152,67 @@ export function destroyInfoPanel() {
 
 /** Definitions, labels and units for common orbital elements */
 const PARAM_DEFS = {
-  a: { label: 'Semi-major axis (a)', unit: 'AU',
-    desc:'Half of the longest diameter of the ellipse. It sets the orbit size and strongly affects the orbital period.',
-    unitsDesc:'Astronomical Unit (AU). 1 AU ≈ 149,597,870 km.' },
-  e: { label: 'Eccentricity (e)', unit: '',
-    desc:'How stretched the ellipse is. 0 = circle; values near 1 = very elongated.',
-    unitsDesc:'Dimensionless (no units), range [0,1) for elliptic orbits.' },
-  i: { label: 'Inclination (i)', unit: 'deg',
-    desc:'Tilt of the orbital plane with respect to the ecliptic. 0° means the orbit lies in the ecliptic plane.',
-    unitsDesc:'Degrees (°).' },
-  om:{ label:'Longitude of ascending node (Ω)', unit:'deg',
-    desc:'Angle in the reference plane from the reference direction to the ascending node (northward crossing).',
-    unitsDesc:'Degrees (°).' },
-  w: { label:'Argument of periapsis (ω)', unit:'deg',
-    desc:'Angle in the orbital plane from the ascending node to periapsis (closest point).',
-    unitsDesc:'Degrees (°).' },
-  mean_anomaly_deg:{ label:'Mean anomaly (M)', unit:'deg',
-    desc:'Angle that increases uniformly with time; from M we solve Kepler’s equation to get the true position.',
-    unitsDesc:'Degrees (°). Sometimes radians.' },
-  M0:{ label:'Mean anomaly at epoch (M₀)', unit:'deg',
-    desc:'Mean anomaly at the epoch t₀. With mean motion n it gives M(t) = M₀ + n·(t−t₀).',
-    unitsDesc:'Degrees (°).' },
-  mean_motion:{ label:'Mean motion (n)', unit:'deg/day',
-    desc:'Average angular speed along the orbit. Often n = 360°/P. In SI, n = √(μ/a³) (rad/s).',
-    unitsDesc:'Degrees per day (°/day) or radians per second.' },
-  n:{ label:'Mean motion (n)', unit:'deg/day',
-    desc:'Average angular speed along the orbit. Often n = 360°/P. In SI, n = √(μ/a³) (rad/s).',
-    unitsDesc:'Degrees per day (°/day) or radians per second.' },
-  epoch:{ label:'Epoch (t₀)', unit:'JD',
-    desc:'Reference instant for these elements. Propagate from t₀ to evaluate at another time.',
-    unitsDesc:'Julian Date (JD). Example: 2451545 = J2000.0.' },
-  hazardous:{ label:'Potentially hazardous?', unit:'',
-    desc:'Monitoring flag (size + approach distance). Not an impact prediction.',
-    unitsDesc:'Boolean (yes/no).' },
-  name:{ label:'Name', unit:'', desc:'', unitsDesc:'' },
-  id:{ label:'ID', unit:'', desc:'', unitsDesc:'' },
+  a: {
+    label: 'Semi-major axis (a)', unit: 'AU',
+    desc: 'Half of the longest diameter of the ellipse. It sets the orbit size and strongly affects the orbital period.',
+    unitsDesc: 'Astronomical Unit (AU). 1 AU ≈ 149,597,870 km.'
+  },
+  e: {
+    label: 'Eccentricity (e)', unit: '',
+    desc: 'How stretched the ellipse is. 0 = circle; values near 1 = very elongated.',
+    unitsDesc: 'Dimensionless (no units), range [0,1) for elliptic orbits.'
+  },
+  i: {
+    label: 'Inclination (i)', unit: 'deg',
+    desc: 'Tilt of the orbital plane with respect to the ecliptic. 0° means the orbit lies in the ecliptic plane.',
+    unitsDesc: 'Degrees (°).'
+  },
+  om: {
+    label: 'Longitude of ascending node (Ω)', unit: 'deg',
+    desc: 'Angle in the reference plane from the reference direction to the ascending node (northward crossing).',
+    unitsDesc: 'Degrees (°).'
+  },
+  w: {
+    label: 'Argument of periapsis (ω)', unit: 'deg',
+    desc: 'Angle in the orbital plane from the ascending node to periapsis (closest point).',
+    unitsDesc: 'Degrees (°).'
+  },
+  mean_anomaly_deg: {
+    label: 'Mean anomaly (M)', unit: 'deg',
+    desc: 'Angle that increases uniformly with time; from M we solve Kepler’s equation to get the true position.',
+    unitsDesc: 'Degrees (°). Sometimes radians.'
+  },
+  M0: {
+    label: 'Mean anomaly at epoch (M₀)', unit: 'deg',
+    desc: 'Mean anomaly at the epoch t₀. With mean motion n it gives M(t) = M₀ + n·(t−t₀).',
+    unitsDesc: 'Degrees (°).'
+  },
+  mean_motion: {
+    label: 'Mean motion (n)', unit: 'deg/day',
+    desc: 'Average angular speed along the orbit. Often n = 360°/P. In SI, n = √(μ/a³) (rad/s).',
+    unitsDesc: 'Degrees per day (°/day) or radians per second.'
+  },
+  n: {
+    label: 'Mean motion (n)', unit: 'deg/day',
+    desc: 'Average angular speed along the orbit. Often n = 360°/P. In SI, n = √(μ/a³) (rad/s).',
+    unitsDesc: 'Degrees per day (°/day) or radians per second.'
+  },
+  epoch: {
+    label: 'Epoch (t₀)', unit: 'JD',
+    desc: 'Reference instant for these elements. Propagate from t₀ to evaluate at another time.',
+    unitsDesc: 'Julian Date (JD). Example: 2451545 = J2000.0.'
+  },
+  hazardous: {
+    label: 'Potentially hazardous?', unit: '',
+    desc: 'Monitoring flag (size + approach distance). Not an impact prediction.',
+    unitsDesc: 'Boolean (yes/no).'
+  },
+  name: { label: 'Name', unit: '', desc: '', unitsDesc: '' },
+  id: { label: 'ID', unit: '', desc: '', unitsDesc: '' },
 };
 
 function h(val) {
-  return String(val).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 function formatValue(key, raw) {
   if (raw == null) return '—';
@@ -204,7 +228,7 @@ function formatValue(key, raw) {
 }
 
 /** Ordered keys to display if present in item.obj */
-const ORDER = ['a','e','i','om','w','mean_anomaly_deg','M0','mean_motion','n','epoch','hazardous'];
+const ORDER = ['a', 'e', 'i', 'om', 'w', 'mean_anomaly_deg', 'M0', 'mean_motion', 'n', 'epoch', 'hazardous'];
 
 export function showPanelFor(item) {
   ensurePanel();
@@ -215,14 +239,20 @@ export function showPanelFor(item) {
 
   // —— SPECIAL CASE: Impactor2025 -> show form instead of info ——
   if (String(displayName).toLowerCase() === 'impactor2025') {
+    try { mascotClear(); } catch { }
+    // --- Mascot messages for Impactor scene ---
+    mascotSay("🛰️ Welcome to the Impactor setup!");
+    setTimeout(() => mascotSay("Here you can set the asteroid’s mass, speed, and density."), 6000);
+    setTimeout(() => mascotSay("Once ready, click 'Impact' to simulate or 'Mitigate' to prevent disaster."), 12000);
+
     const MAX_MASS_KG = 1e12; // 1 billón de toneladas = 10^12 kg
     const MIN_VEL_KMS = 11;   // 11 km/s
     const MAX_VEL_KMS = 72;   // 72 km/s
 
     // precrear ids únicos para tooltips
-    const tipMassId = `tip-mass-${Math.random().toString(36).slice(2,7)}`;
-    const tipVelId  = `tip-vel-${Math.random().toString(36).slice(2,7)}`;
-    const tipDenId  = `tip-den-${Math.random().toString(36).slice(2,7)}`;
+    const tipMassId = `tip-mass-${Math.random().toString(36).slice(2, 7)}`;
+    const tipVelId = `tip-vel-${Math.random().toString(36).slice(2, 7)}`;
+    const tipDenId = `tip-den-${Math.random().toString(36).slice(2, 7)}`;
 
     panelEl.innerHTML = `
       <div class="topbar">
@@ -291,13 +321,13 @@ export function showPanelFor(item) {
 
     // Buttons
     panelEl.querySelector('#btn-reset')?.addEventListener('click', () => {
-      for (const fn of resetHandlers) try { fn(); } catch {}
+      for (const fn of resetHandlers) try { fn(); } catch { }
     });
 
     const $mass = panelEl.querySelector('#inp-mass');
-    const $vel  = panelEl.querySelector('#inp-velocity');
+    const $vel = panelEl.querySelector('#inp-velocity');
     const $dens = panelEl.querySelector('#sel-density');
-    const $msg  = panelEl.querySelector('#msg-validation');
+    const $msg = panelEl.querySelector('#msg-validation');
 
     // Toggle de los "?" del formulario
     panelEl.querySelectorAll('.qmark.inline').forEach(el => {
@@ -325,8 +355,8 @@ export function showPanelFor(item) {
     }
     function validateAndShow() {
       const ok = impactorState.massKg !== null &&
-                 impactorState.speedKms !== null &&
-                 impactorState.densityKgM3 !== null;
+        impactorState.speedKms !== null &&
+        impactorState.densityKgM3 !== null;
       $msg.textContent = ok ? '' : 'Please fill mass, velocity (11–72 km/s) and density.';
       return ok;
     }
@@ -429,7 +459,7 @@ export function showPanelFor(item) {
   panelEl.style.display = 'block';
 
   panelEl.querySelector('#btn-reset')?.addEventListener('click', () => {
-    for (const fn of resetHandlers) try { fn(); } catch {}
+    for (const fn of resetHandlers) try { fn(); } catch { }
   });
 
   panelEl.querySelectorAll('.qmark').forEach(el => {

@@ -2,14 +2,12 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { mascotSay } from "../utils/mascotBus";
 
-// traer los parámetros del formulario
 import { calcularImpacto } from "../simulation/impact-utils.js";
 
-// === FIXED seismic efficiency (read-only) ===
 const ETA_SEISMIC = 0.10; // 10%
 
-/* ---------- THEME: Dark glassy (matching Mitigation) ---------- */
 const DRAWER_WIDTH = 360;
 
 const styles = {
@@ -18,7 +16,7 @@ const styles = {
     position: "absolute", inset: 0, width: "100%", height: "100%",
     background: "#061224"
   },
-  // --- NUEVOS estilos para tooltips educativos ---
+
   infoRow: {
     display: "flex",
     justifyContent: "space-between",
@@ -54,7 +52,6 @@ const styles = {
     left: "50%",
     bottom: "125%",
     transform: "translateX(-50%)",
-    // estilo “glass card”
     background: "linear-gradient(180deg, rgba(13,25,48,0.95), rgba(8,18,36,0.92))",
     color: "#e9f2ff",
     padding: "10px 12px",
@@ -63,7 +60,7 @@ const styles = {
     boxShadow: "0 12px 30px rgba(0,0,0,.45)",
     fontSize: 12.5,
     lineHeight: 1.45,
-    whiteSpace: "normal",   // ✅ permite varias líneas
+    whiteSpace: "normal",
     maxWidth: 280,
     zIndex: 999,
     opacity: 1,
@@ -74,8 +71,6 @@ const styles = {
     opacity: 1
   },
 
-
-  // NUEVO: cabecera de sección plegable + botón
   sectionHeaderRow: {
     display: "flex",
     alignItems: "center",
@@ -94,7 +89,6 @@ const styles = {
     cursor: "pointer",
   },
 
-  // NUEVO: fila de pestañas (para Tsunami)
   tabsRow: {
     display: "flex",
     gap: 8,
@@ -115,7 +109,6 @@ const styles = {
     background: "rgba(24, 45, 78, 0.85)",
   },
 
-  // Tirador lateral visible cuando el panel está cerrado
   pullTab: {
     position: "absolute",
     left: 0,
@@ -134,7 +127,6 @@ const styles = {
     boxShadow: "0 4px 12px rgba(0,0,0,.3)",
   },
 
-  // Botón flotante de ayuda (cuando el panel está cerrado)
   helpFab: {
     position: "absolute",
     top: 12,
@@ -155,7 +147,6 @@ const styles = {
     boxShadow: "0 6px 18px rgba(0,0,0,.35)"
   },
 
-  // Cabecera del panel de ayuda (título + cerrar)
   helpHeader: {
     display: "flex",
     alignItems: "center",
@@ -177,7 +168,6 @@ const styles = {
     cursor: "pointer"
   },
 
-  // Cuadro de ayuda reutiliza titleBox
   titleBox: {
     position: "absolute",
     top: 56,
@@ -216,7 +206,6 @@ const styles = {
   sectionTitle: { fontWeight: 700, margin: "6px 0 10px", letterSpacing: ".2px" },
   subTitle: { fontWeight: 600, marginBottom: 6 },
 
-  // Fila de cabecera del panel y botón de toggle
   headerRow: {
     display: "flex",
     alignItems: "center",
@@ -324,11 +313,6 @@ const styles = {
 };
 
 
-
-/* ---------- Original logic & helpers (unchanged) ---------- */
-
-// --- MMI palette / descriptions adapted for impact shaking ---
-// --- MMI palette / descriptions adapted for impact shaking (high contrast for dark theme) ---
 const mmiBreaks = [
   { max: 1.9, label: "I", color: "#a6d4fa", desc: "Not felt / instrumental detection only." },
   { max: 2.9, label: "II", color: "#7cc4f7", desc: "Very weak: felt by a few people at rest." },
@@ -597,7 +581,7 @@ function calcCraterFromInputs({
 }
 
 /** ============================
- *  FUEGO (dosis térmica ~ 1/R^2)
+ *  FIRE ( 1/R^2)
  *  ============================*/
 function calcFireRingRadius({ energiaJ, fRad = 0.03, Qt_kJ_m2 = 8, attenuation = 1.0 }) {
   if (!energiaJ || energiaJ <= 0) return null;
@@ -609,7 +593,7 @@ function calcFireRingRadius({ energiaJ, fRad = 0.03, Qt_kJ_m2 = 8, attenuation =
 }
 
 /** ============================
- *  ONDA DE CHOQUE (sobrepresión)
+ *  Shock wave
  *  ============================*/
 const PSI_TO_KPA = 6.89476;
 function peakOverpressure_kPa_from_Z(Z) {
@@ -639,7 +623,7 @@ function calcShockRingRadius({ energiaJ, Pth_kPa = 30 }) {
 }
 
 /** ============================
- *  MAGNITUD SÍSMICA (Mw) desde energía
+ *  Sismic wave
  *  ============================*/
 function mwFromEnergyJoules(Ej) {
   if (!Number.isFinite(Ej) || Ej <= 0) return null;
@@ -652,7 +636,6 @@ function mwFromImpactEnergy(energiaJ, etaSeismic = ETA_SEISMIC) {
   return mwFromEnergyJoules(Es);
 }
 
-// --- Badge styling for tsunami status ---
 const badgeStyle = (level) => {
   const base = {
     display: "inline-block",
@@ -727,7 +710,6 @@ function ClickTip({ tip, label = "Help" }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef(null);
 
-  // Cerrar al hacer clic fuera
   useEffect(() => {
     function onDocClick(e) {
       if (!btnRef.current) return;
@@ -737,7 +719,6 @@ function ClickTip({ tip, label = "Help" }) {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  // Cerrar con Esc
   useEffect(() => {
     function onKey(e) {
       if (e.key === "Escape") setOpen(false);
@@ -766,7 +747,6 @@ function ClickTip({ tip, label = "Help" }) {
   );
 }
 
-
 export default function ImpactMMI() {
   const { eventId: routeEventId } = useParams();
   const eventId = routeEventId || "us6000rcqw"; // demo default
@@ -776,7 +756,6 @@ export default function ImpactMMI() {
   const groupRef = useRef(null);
   const contoursLayerRef = useRef(null);
 
-  // Ayuda flotante
   const [helpOpen, setHelpOpen] = useState(false);
 
   // Crater
@@ -798,7 +777,7 @@ export default function ImpactMMI() {
   const [impactInputs, setImpactInputs] = useState(null);
   const [craterDims, setCraterDims] = useState(null);
 
-  // Mw equivalente (η fija)
+  // Mw (η fixed)
   const [mwEquivalent, setMwEquivalent] = useState(null);
 
   const navigate = useNavigate();
@@ -823,8 +802,45 @@ export default function ImpactMMI() {
 
   // Tsunami tabs
   const [tsuTab, setTsuTab] = useState("summary");
+  useEffect(() => {
+    mascotSay("Oh no! You've chosen to impact it. Let's see what happens!");
+    const t1 = setTimeout(() => {
+      mascotSay("Asteroids hit Earth all the time, but a big one could change everything!");
+    }, 10000);  // Aumenté el tiempo de espera
+    const t2 = setTimeout(() => {
+      mascotSay("Now let's look at the consequences!");
+    }, 20000);  // Aumenté el tiempo de espera
+    const t3 = setTimeout(() => {
+      mascotSay("Asteroid impacts are one of nature’s most powerful forces — but don’t worry, we’re keeping an eye on them!");
+    }, 30000);  // Aumenté el tiempo de espera
+    const t4 = setTimeout(() => {
+      mascotSay("The higher the seismic efficiency, the more of the impact's energy is converted into shaking. That’s why earthquakes and impacts can feel so similar!");
+    }, 40000);  // Aumenté el tiempo de espera
+    const t5 = setTimeout(() => {
+      mascotSay("Did you know? Asteroids made of metal are much denser than those made of ice or rock. They hit harder!");
+    }, 50000);  // Aumenté el tiempo de espera
+    const t6 = setTimeout(() => {
+      mascotSay("The speed of an asteroid can reach up to 70,000 km/h — that’s more than 60 times faster than a bullet!");
+    }, 60000);  // Aumenté el tiempo de espera
+    const t7 = setTimeout(() => {
+      mascotSay("If an asteroid hits the ocean, it could trigger a massive tsunami — waves big enough to wipe out coastal cities. 🌊");
+    }, 70000);  // Aumenté el tiempo de espera
+    const t8 = setTimeout(() => {
+      mascotSay("The largest asteroid impact in recorded history happened 66 million years ago, and it wiped out the dinosaurs.");
+    }, 80000);  // Aumenté el tiempo de espera
 
-  // NUEVO: Estado de apertura/cierre por sección (todo cerrado por defecto)
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      clearTimeout(t4);
+      clearTimeout(t5);
+      clearTimeout(t6);
+      clearTimeout(t7);
+      clearTimeout(t8);
+    };
+  }, []);
+
   const [openSections, setOpenSections] = useState({
     form: false,
     mmi: false,
@@ -838,7 +854,6 @@ export default function ImpactMMI() {
   const toggleSection = (key) =>
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
 
-  // 1) Cargar mapa una vez
   useEffect(() => {
     if (!mapRef.current && containerRef.current) {
       const map = L.map(containerRef.current, { zoomControl: true }).setView([20, 0], 2);
@@ -863,7 +878,6 @@ export default function ImpactMMI() {
     }
   }, []);
 
-  // 2) Invalidate tras animación del drawer
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -871,7 +885,6 @@ export default function ImpactMMI() {
     return () => clearTimeout(t);
   }, [drawerOpen]);
 
-  // 3) Leer parámetros del formulario y calcular
   useEffect(() => {
     const res = calcularImpacto();
     setImpactInputs(res || null);
@@ -961,7 +974,6 @@ export default function ImpactMMI() {
     shockLayerRef.current = ring;
   };
 
-  // 4) Cargar evento + dibujar
   useEffect(() => {
     const map = mapRef.current, group = groupRef.current;
     if (!map || !group) return;
@@ -1007,7 +1019,6 @@ export default function ImpactMMI() {
           )
           .addTo(group);
 
-        // Anillos
         drawCraterRing(lat, lon);
         drawFireRing(lat, lon);
         drawShockRing(lat, lon);
@@ -1138,7 +1149,6 @@ export default function ImpactMMI() {
     });
   }, [selectedLabel]);
 
-  // Redibujar anillos cuando cambien
   useEffect(() => {
     const c = impactLatLonRef.current; if (!c) return;
     drawCraterRing(c.lat, c.lon);
@@ -1214,34 +1224,33 @@ export default function ImpactMMI() {
       )}
 
       {!helpOpen && (
-      <button
-        onClick={() => navigate("/")}
-        title="Back to Menu"
-        aria-label="Back to Menu"
-        style={{
-          position: "absolute",
-          top: 12,
-          right: 60, // separa del botón de ayuda
-          zIndex: 1100,
-          width: 100,
-          height: 36,
-          borderRadius: 8,
-          border: "1px solid rgba(173, 216, 255, 0.35)",
-          background: "rgba(24, 45, 78, 0.85)",
-          color: "#e9f2ff",
-          fontWeight: 600,
-          fontSize: 13,
-          lineHeight: "34px",
-          textAlign: "center",
-          cursor: "pointer",
-          backdropFilter: "blur(6px)",
-          boxShadow: "0 6px 18px rgba(0,0,0,.35)"
-        }}
-      >
-        Back to Menu
-      </button>
-    )}
-
+        <button
+          onClick={() => navigate("/")}
+          title="Back to Menu"
+          aria-label="Back to Menu"
+          style={{
+            position: "absolute",
+            top: 12,
+            right: 60, // separa del botón de ayuda
+            zIndex: 1100,
+            width: 100,
+            height: 36,
+            borderRadius: 8,
+            border: "1px solid rgba(173, 216, 255, 0.35)",
+            background: "rgba(24, 45, 78, 0.85)",
+            color: "#e9f2ff",
+            fontWeight: 600,
+            fontSize: 13,
+            lineHeight: "34px",
+            textAlign: "center",
+            cursor: "pointer",
+            backdropFilter: "blur(6px)",
+            boxShadow: "0 6px 18px rgba(0,0,0,.35)"
+          }}
+        >
+          Back to Menu
+        </button>
+      )}
 
       {/* Panel de ayuda: si está abierto, muestra info y × */}
       {helpOpen && (
@@ -1258,27 +1267,27 @@ export default function ImpactMMI() {
             </button>
           </div>
 
-          <div style={{opacity:.9}}>
-            <div style={{marginBottom:8}}>
+          <div style={{ opacity: .9 }}>
+            <div style={{ marginBottom: 8 }}>
               This view shows <strong>ground shaking</strong> people might feel,
               using <em>intensity bands (MMI)</em>. It’s a simple way to explain
               effects from an asteroid impact.
             </div>
 
-            <div style={{marginBottom:8}}>
+            <div style={{ marginBottom: 8 }}>
               <strong>How to use:</strong>
-              <ul style={{margin: "6px 0 0 16px"}}>
+              <ul style={{ margin: "6px 0 0 16px" }}>
                 <li>Select an <strong>MMI level</strong> to highlight similar shaking.</li>
                 <li>Check <strong>Exposed population</strong> to see how many people might be affected.</li>
                 <li>Explore <strong>crater, fire, and shock rings</strong> for other effects.</li>
               </ul>
             </div>
 
-            <div style={{marginBottom:8}}>
+            <div style={{ marginBottom: 8 }}>
               <strong>About “Equivalent Mw”:</strong> a teaching estimate comparing impact energy with earthquake size.
             </div>
 
-            <div style={{opacity:.8, fontSize:12}}>
+            <div style={{ opacity: .8, fontSize: 12 }}>
               <strong>Note:</strong> Educational demo. Real models consider geology, atmosphere, angle, etc.
             </div>
           </div>
@@ -1322,22 +1331,22 @@ export default function ImpactMMI() {
           {openSections.impact && (
             <div style={styles.card}>
               {[
-              { label: "Mass", value: "1.200.000.000 kg", tip: "The total mass of the impacting body — heavier objects carry more energy." },
-              { label: "Density", value: "1500 kg/m³", tip: "Density indicates material type — e.g. ice, rock, or metal." },
-              { label: "Speed", value: "22 km/s (22.000 m/s)", tip: "Velocity has a squared effect on impact energy (E = ½·m·v²)." },
-              { label: "Energy", value: "2.9×10¹⁷ J", tip: "Kinetic energy released upon impact — comparable to millions of tons of TNT." },
-              { label: "Estimated impactor diameter", value: "≈115 m", tip: "Approximate diameter inferred from mass and density." },
-              { label: "Seismic efficiency (η)", value: "10%", tip: "Fraction of energy that becomes ground motion (teaching constant)." },
-              { label: "Equivalent Mw", value: "7.78", tip: "Estimated earthquake magnitude producing similar ground shaking." }
-            ].map(({ label, value, tip }, i) => (
-              <div key={i} style={styles.infoRow}>
-                <div style={styles.infoLabel}>
-                  <span /* ¡sin title! */>{label}</span>
-                  <ClickTip tip={tip} label={`About ${label}`} />
+                { label: "Mass", value: "1.200.000.000 kg", tip: "The total mass of the impacting body — heavier objects carry more energy." },
+                { label: "Density", value: "1500 kg/m³", tip: "Density indicates material type — e.g. ice, rock, or metal." },
+                { label: "Speed", value: "22 km/s (22.000 m/s)", tip: "Velocity has a squared effect on impact energy (E = ½·m·v²)." },
+                { label: "Energy", value: "2.9×10¹⁷ J", tip: "Kinetic energy released upon impact — comparable to millions of tons of TNT." },
+                { label: "Estimated impactor diameter", value: "≈115 m", tip: "Approximate diameter inferred from mass and density." },
+                { label: "Seismic efficiency (η)", value: "10%", tip: "Fraction of energy that becomes ground motion (teaching constant)." },
+                { label: "Equivalent Mw", value: "7.78", tip: "Estimated earthquake magnitude producing similar ground shaking." }
+              ].map(({ label, value, tip }, i) => (
+                <div key={i} style={styles.infoRow}>
+                  <div style={styles.infoLabel}>
+                    <span /* ¡sin title! */>{label}</span>
+                    <ClickTip tip={tip} label={`About ${label}`} />
+                  </div>
+                  <div style={styles.infoValue}>{value}</div>
                 </div>
-                <div style={styles.infoValue}>{value}</div>
-              </div>
-            ))}
+              ))}
             </div>
           )}
         </div>
