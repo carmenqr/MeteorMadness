@@ -85,7 +85,7 @@ pip install -r requirements.txt
 ```
 #### Configurate APIs
 ```bash
--- This API_KEY is an example generated in: https://api.nasa.gov/
+# This API_KEY is an example generated in: https://api.nasa.gov/
 export NASA_API_KEY="BrayMFziYdhq2l5OaNMzEnpL46gaVEWEbVjDzOQe"
 ```
 #### Run the Flask App
@@ -94,17 +94,17 @@ python app.py
 ```
 
 ### 3️⃣ Set up the Frontend (React + Vite)
+Open a new terminal:
 ```bash
--- open a new terminal
 cd frontend
 ```
 
 ### Ensure Node version and istall dependencies
 ```bash
--- Ensure correct Node version
+# Ensure correct Node version
 nvm use
 
--- Install dependencies
+# Install dependencies
 npm ci
 ```
 #### Start the development server
