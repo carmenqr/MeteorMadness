@@ -419,32 +419,18 @@ function ensureUI() {
     const wrap = registerNode(document.createElement('div'));
     Object.assign(wrap.style, {
       position: 'fixed', top: '12px', right: '12px', zIndex: 30,
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
+      display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px',
       pointerEvents: 'auto', fontFamily: 'system-ui, sans-serif'
     });
-    const labelSel = document.createElement('div');
-    labelSel.textContent = 'Bodies';
-    Object.assign(labelSel.style, {
-      fontSize: '24px', fontWeight: '800', color: '#f2f6ff', letterSpacing: '1px',
-      textShadow:'0 4px 10px rgba(0,0,0,0.7), 0 0 6px rgba(120,170,255,0.35)',
-      background:'linear-gradient(145deg, rgba(10,18,35,0.55), rgba(30,50,90,0.55))',
-      padding:'10px 26px', borderRadius:'32px',
-      border:'1px solid rgba(255,255,255,0.25)', backdropFilter:'blur(6px)',
-      boxShadow:'0 8px 28px -10px rgba(0,0,0,0.75), inset 0 0 0 1px rgba(255,255,255,0.06)',
-      textTransform:'uppercase'
-    });
+    const labelSel = document.createElement('label');
+    labelSel.textContent = 'Asteroids:';
+    Object.assign(labelSel.style, { fontSize: '11px', fontWeight: '600', color: '#fff', textShadow:'0 1px 2px #000' });
     const sel = document.createElement('select');
     sel.id = 'asteroid-select';
     Object.assign(sel.style, {
-      padding: '14px 22px', borderRadius: '18px', background: 'linear-gradient(155deg, rgba(28,42,70,0.9), rgba(12,18,30,0.9))', color: '#f1f5f9',
-      border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer', fontSize: '16px', fontWeight:'500',
-      boxShadow:'0 6px 22px -6px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.08)',
-      backdropFilter:'blur(7px)', minWidth:'240px', appearance:'none', WebkitAppearance:'none'
+      padding: '6px 8px', borderRadius: '8px', background: 'rgba(0,0,0,0.55)', color: '#fff',
+      border: '1px solid #ffffff33', cursor: 'pointer', fontSize: '12px'
     });
-    sel.addEventListener('mouseover', () => sel.style.borderColor = '#3b82f6');
-    sel.addEventListener('mouseout', () => sel.style.borderColor = 'rgba(255,255,255,0.25)');
-    sel.addEventListener('focus', () => { sel.style.outline='none'; sel.style.boxShadow='0 0 0 2px rgba(59,130,246,0.55)'; });
-    sel.addEventListener('blur', () => { sel.style.boxShadow='0 4px 18px -4px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.07)'; });
     sel.innerHTML = '<option value="__loading" disabled selected>Loading…</option>';
 
     sel.addEventListener('change', (e) => {
@@ -521,7 +507,13 @@ function resetIsolation(listRef) {
       it.pathLine.visible = true;
       if (it.pathLine.material) {
         it.pathLine.material.transparent = true;
-        it.pathLine.material.opacity = 0.25;
+        if (it === earthItem) {
+          it.pathLine.material.opacity = 0.6;          // Tierra
+        } else if (/impactor[- ]?2025/i.test(it.mesh.name || '')) {
+          it.pathLine.material.opacity = 0.4;          // Impactor
+        } else {
+          it.pathLine.material.opacity = 0.25;         // Otros
+        }
       }
     }
     // Mostrar de nuevo TODOS los labels tras reset
@@ -598,7 +590,7 @@ function iniciarSimulacion(mountEl) {
 
       const earthPts = getOrbitPoints(earthData, 512);
       const pathGeomE = new THREE.BufferGeometry().setFromPoints(earthPts);
-      const pathMatE = new THREE.LineBasicMaterial({ color: 0x2b6fff, transparent: true, opacity: 0.25, depthWrite:false });
+      const pathMatE = new THREE.LineBasicMaterial({ color: 0x2b6fff, transparent: true, opacity: 0.6, depthWrite:false });
       const pathLineE = new THREE.Line(pathGeomE, pathMatE);
       pathLineE.frustumCulled = false;
       scene.add(pathLineE, meshE);
@@ -632,7 +624,7 @@ function iniciarSimulacion(mountEl) {
 
     const orbitPts = getOrbitPoints(obj, 512);
     const pathGeom = new THREE.BufferGeometry().setFromPoints(orbitPts);
-    const pathMat  = new THREE.LineBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.25, depthWrite:false });
+    const pathMat  = new THREE.LineBasicMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.25, depthWrite:false });
     const pathLine = new THREE.Line(pathGeom, pathMat);
     pathLine.frustumCulled = false;
     scene.add(pathLine, mesh);
@@ -681,7 +673,7 @@ function iniciarSimulacion(mountEl) {
       if (impactorItem.pathLine?.material?.color) {
         impactorItem.pathLine.material.color.set(0xffaa00);
         impactorItem.pathLine.material.transparent = true;
-        impactorItem.pathLine.material.opacity = 0.25; // órbita bien visible al aislar
+        impactorItem.pathLine.material.opacity = 0.4; // órbita bien visible al aislar
       }
     } catch {}
 

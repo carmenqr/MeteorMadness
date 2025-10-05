@@ -1,7 +1,8 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { MAX_CAM_DIST, MIN_CAM_DIST } from '../lib/scene_utils.js';
 import sunUrl from '../assets/sun.jpg'
-import backgroundUrl from '../assets/stars.jpg'
+import backgroundUrl from '../assets/stars_milky_way.jpg'
 
 export function createScene(mountNode = null) {
   const container = mountNode ?? document.createElement('div')
@@ -10,15 +11,26 @@ export function createScene(mountNode = null) {
     document.body.appendChild(container)
   }
 
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true  })
+
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x000000)
   new THREE.TextureLoader().load(
     backgroundUrl,
     tex => {
       tex.colorSpace = THREE.SRGBColorSpace
-      // Si quieres también usarlo como envMap para un leve ambient:
-      tex.mapping = THREE.EquirectangularReflectionMapping
-      scene.background = tex
+      // Creamos cúpula interna (esfera invertida) con opacidad controlable
+      const domeGeo = new THREE.SphereGeometry(120, 64, 64)
+      const domeMat = new THREE.MeshBasicMaterial({
+        map: tex,
+        side: THREE.BackSide,
+        transparent: true,
+        opacity: 0.35,          // ajusta translucidez (0.2–0.5)
+        depthWrite: false
+      })
+      const starDome = new THREE.Mesh(domeGeo, domeMat)
+      starDome.name = '__starDome'
+      scene.add(starDome)
     },
     undefined,
     err => console.warn('No se pudo cargar fondo estrellas', err)
@@ -29,8 +41,6 @@ export function createScene(mountNode = null) {
 
   const camera = new THREE.PerspectiveCamera(60, width / height, 0.01, 1000)
   camera.position.set(2.5, 1.7, 3.2)
-
-  const renderer = new THREE.WebGLRenderer({ antialias: true })
 
   // Color y luces físicas
   renderer.outputColorSpace = THREE.SRGBColorSpace
@@ -50,6 +60,22 @@ export function createScene(mountNode = null) {
   controls.enablePan = true
   controls.enableZoom = true
   controls.target.set(0, 0, 0)
+
+  // Límites de zoom (distancia cámara–target)
+  controls.minDistance = MIN_CAM_DIST   // distancia mínima (zoom in máximo)
+  controls.maxDistance = MAX_CAM_DIST    // distancia máxima (zoom out)
+
+  // Clamp extra por si mueves cámara manualmente fuera de controles
+  function clampDistance() {
+    const v = camera.position.clone().sub(controls.target)
+    let d = v.length()
+    if (d < controls.minDistance) {
+      camera.position.copy(controls.target).add(v.setLength(controls.minDistance))
+    } else if (d > controls.maxDistance) {
+      camera.position.copy(controls.target).add(v.setLength(controls.maxDistance))
+    }
+  }
+  controls.addEventListener('change', clampDistance)
 
   const STAR_COUNT = 1500;         // número de estrellas
   const SHELL_RADIUS = 22;         // radio medio (antes ~50*0.8=40)
@@ -82,7 +108,7 @@ export function createScene(mountNode = null) {
   // El Sol NO recibe luz: MeshBasicMaterial ignora luces (actúa como emisor)
   const R = 0.05 // radio del sol en tu escena
 
-    // --- Textura local del Sol ---
+  // --- Textura local del Sol ---
   const sunTex = new THREE.TextureLoader().load(sunUrl, t => {
     t.colorSpace = THREE.SRGBColorSpace
     t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy())

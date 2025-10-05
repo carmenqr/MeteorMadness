@@ -59,3 +59,99 @@ export function getOrbitPoints(obj, steps = 512) {
   }
   return pts;
 }
+
+/*
+// ====== ORBIT TRAIL HELPERS ======
+export function _wrapIndex(i, n){ return (i % n + n) % n; }
+
+export function _nearestIndexOnOrbit(pts, pos){
+  // O(N) – suficiente para 512 pts
+  let bestI = 0, bestD2 = Infinity;
+  for (let i=0; i<pts.length; i++){
+    const p = pts[i];
+    const dx = p.x - pos.x, dy = p.y - pos.y, dz = p.z - pos.z;
+    const d2 = dx*dx + dy*dy + dz*dz;
+    if (d2 < bestD2){ bestD2 = d2; bestI = i; }
+  }
+  return bestI;
+}
+
+// Crea segmentos de la órbita para poder variar opacidades por tramo (como "estela")
+export function makeOrbitTrailFast(scene, orbitPts, {
+  color = 0x00ff00,
+  baseOpacity = 0.06,
+  hiOpacities = [0.95, 0.45, 0.18], // más cerca del asteroide → más opaca
+  hiWindows   = [36, 90, 180],      // tamaño de ventana en puntos (ajusta a tu densidad)
+} = {}) {
+  const baseGeom = new THREE.BufferGeometry().setFromPoints(orbitPts);
+  const baseMat  = new THREE.LineBasicMaterial({ color, transparent:true, opacity: baseOpacity, depthWrite:false });
+  const baseLine = new THREE.Line(baseGeom, baseMat);
+  baseLine.frustumCulled = false;
+  scene.add(baseLine);
+
+  // Reutilizamos la MISMA geometría para las tres ventanas (menos memoria)
+  const hiLines = hiOpacities.map((alpha) => {
+    const m = new THREE.LineBasicMaterial({ color, transparent:true, opacity: alpha, depthWrite:false });
+    const l = new THREE.Line(baseGeom, m);
+    l.frustumCulled = false;
+    // Empezamos con drawRange vacío (nada dibujado)
+    l.geometry.setDrawRange(0, 0);
+    scene.add(l);
+    return l;
+  });
+
+  return {
+    pts: orbitPts,
+    baseLine,
+    hiLines,      // array de 3 Line
+    hiWindows,    // tamaños de ventana en puntos
+  };
+}
+
+// Actualiza las ventanas deslizantes alrededor del índice actual (reciente detrás del asteroide)
+export function updateOrbitTrailFast(trail, currentIdx) {
+  if (!trail?.pts?.length) return;
+  const N = trail.pts.length;
+
+  // Función que aplica drawRange envolviendo por 0..N-1 si hace falta
+  const applyWindow = (line, endIdx, win) => {
+    // Ventana "reciente": desde endIdx - win hasta endIdx (incl.)
+    let start = endIdx - win + 1;
+    let count;
+    if (start >= 0) {
+      // ventana en un solo tramo
+      count = Math.max(0, Math.min(win, N - start));
+      line.geometry.setDrawRange(start, count);
+      line.visible = (count > 1);
+      // No necesitamos una segunda línea: esta ventana no cruza el 0
+      line.userData._split = null;
+    } else {
+      // CRUZA el 0: partimos en DOS rangos -> usamos una segunda "sombra" con mismo material
+      // Para no crear objetos extra, duplicamos con un "ghost" si no existe
+      if (!line.userData._split) {
+        const ghost = new THREE.Line(line.geometry, line.material);
+        ghost.frustumCulled = false;
+        line.parent.add(ghost);
+        line.userData._split = ghost;
+      }
+      const ghost = line.userData._split;
+
+      // Primer tramo [0 .. endIdx]
+      const countA = Math.max(0, endIdx + 1);
+      line.geometry.setDrawRange(0, countA);
+      line.visible = (countA > 1);
+
+      // Segundo tramo [N + start .. N-1]
+      const startB = N + start;            // positivo
+      const countB = Math.max(0, N - startB);
+      ghost.geometry.setDrawRange(startB, countB);
+      ghost.visible = (countB > 1);
+    }
+  };
+
+  // Ventana más opaca cerca del punto actual, otras más largas y menos opacas por detrás
+  for (let i = 0; i < trail.hiLines.length; i++) {
+    applyWindow(trail.hiLines[i], currentIdx, trail.hiWindows[i]);
+  }
+}
+  */
