@@ -224,6 +224,34 @@ function restoreDefaultView({ smooth = false, duration = 700 } = {}) {
   requestAnimationFrame(step);
 }
 
+async function loadEarthWithFallback() {
+  // 1) intenta backend
+  try {
+    const r = await fetch("/api/earth", { cache: "no-store" });
+    if (!r.ok) throw new Error(String(r.status));
+    const d = await r.json();
+    return Array.isArray(d) ? d[0] : d;
+  } catch (e1) {
+    console.warn("No se pudo cargar /api/earth, usando /mocks/earth.json …", e1);
+  }
+
+  // 2) fallback a JSON estático servido por Vite/Vercel
+  try {
+    const r2 = await fetch("/mocks/earth.json", { cache: "no-store" });
+    if (!r2.ok) throw new Error(String(r2.status));
+    return await r2.json();
+  } catch (e2) {
+    console.warn("No se pudo cargar /mocks/earth.json, usando valores por defecto …", e2);
+  }
+
+  // 3) último recurso: valores embebidos
+  return {
+    id: "earth", name: "Earth", hazardous: false,
+    a: 1.00000011, e: 0.01671022, i: 0.00005, om: -11.26064, w: 102.94719,
+    epoch: 2451545.0, mean_anomaly_deg: 100.46435, M0: 0.9856076686
+  };
+}
+
 async function cargarAsteroides() {
   // helper para normalizar columnas del CSV a tu formato
   const normalizeRow = (r) => ({
@@ -319,23 +347,9 @@ async function cargarAsteroides() {
     asteroides.push(impactor2025);
   }
 
-  try {
-    const resEarth = await fetch("/api/earth", { credentials: "same-origin" });
-    if (resEarth.ok) {
-      const d = await resEarth.json();
-      earthData = Array.isArray(d) ? d[0] : d;
-      if (!earthData?.name) earthData.name = "Earth";
-    } else {
-      console.warn("No se pudo cargar /api/earth:", resEarth.status);
-    }
-  } catch (e) {
-    console.warn("Error cargando /api/earth; usando valores por defecto.", e);
-    earthData = {
-      id: "earth", name: "Earth", hazardous: false,
-      a: 1.00000011, e: 0.01671022, i: 0.00005, om: -11.26064, w: 102.94719,
-      epoch: 2451545.0, mean_anomaly_deg: 100.46435, M0: 0.9856076686
-    };
-  }
+  earthData = await loadEarthWithFallback();
+  if (!earthData?.name) earthData.name = "Earth";
+
 }
 
 
